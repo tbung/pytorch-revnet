@@ -48,8 +48,55 @@ class Bottleneck(nn.Module):
 
 
 class RevNet(nn.Module):
-    def __init__(self):
-        pass
+    def __init__(self,
+                 units,
+                 filters,
+                 strides,
+                 classes,
+                 bottleneck=False):
+        """
+        Parameters
+        ----------
+
+        units: list-like
+            Number of residual units in each group
+
+        filters: list-like
+            Number of filters in each unit including the inputlayer, so it is
+            one item longer than units
+
+        strides: list-like
+            Strides to use for the first units in each group, same length as
+            units
+
+        bottleneck: boolean
+            Wether to use the bottleneck residual or the basic residual
+        """
+
+        if bottleneck:
+            self.Residual = Bottleneck
+        else:
+            self.Residual = Block
+
+        self.layers = nn.ModuleList()
+
+        # Input layer
+        self.layers.append(nn.Conv2d(3, filters[0], padding=1))
+        self.layers.append(nn.BatchNorm2d(filters[0]))
+
+        for i, group in enumerate(units):
+            self.layers.append(self.Residual(filters[i - 1], filters[i],
+                                             stride=strides[i]))
+
+            for unit in range(1, group):
+                self.layers.append(self.Residual(filters[i], filters[i]))
+
+        self.fc = nn.Linear(filters[-1], classes)
 
     def forward(self, x):
-        pass
+        for layer in self.layers:
+            x = layer(x)
+
+        x = F.avg_pool2d(x, x.size(0))
+        x = x.view(x.size(0), -1)
+        x = self.fc(x)
