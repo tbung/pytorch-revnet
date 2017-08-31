@@ -34,7 +34,7 @@ class Block(nn.Module):
 
         orig_x = self.res(orig_x)
 
-        out = F.relu(self.bn2(self.conv2(x)) + orig_x)
+        out = F.relu(self.bn2(self.conv2(out)) + orig_x)
 
         return out
 
@@ -47,7 +47,7 @@ class Bottleneck(nn.Module):
         pass
 
 
-class RevNet(nn.Module):
+class ResNet(nn.Module):
     def __init__(self,
                  units,
                  filters,
@@ -72,6 +72,7 @@ class RevNet(nn.Module):
         bottleneck: boolean
             Wether to use the bottleneck residual or the basic residual
         """
+        super(ResNet, self).__init__()
 
         if bottleneck:
             self.Residual = Bottleneck
@@ -81,15 +82,15 @@ class RevNet(nn.Module):
         self.layers = nn.ModuleList()
 
         # Input layer
-        self.layers.append(nn.Conv2d(3, filters[0], padding=1))
+        self.layers.append(nn.Conv2d(3, filters[0], 3, padding=1))
         self.layers.append(nn.BatchNorm2d(filters[0]))
 
         for i, group in enumerate(units):
-            self.layers.append(self.Residual(filters[i - 1], filters[i],
+            self.layers.append(self.Residual(filters[i], filters[i + 1],
                                              stride=strides[i]))
 
             for unit in range(1, group):
-                self.layers.append(self.Residual(filters[i], filters[i]))
+                self.layers.append(self.Residual(filters[i + 1], filters[i + 1]))
 
         self.fc = nn.Linear(filters[-1], classes)
 
@@ -97,6 +98,8 @@ class RevNet(nn.Module):
         for layer in self.layers:
             x = layer(x)
 
-        x = F.avg_pool2d(x, x.size(0))
+        x = F.avg_pool2d(x, x.size(2))
         x = x.view(x.size(0), -1)
         x = self.fc(x)
+
+        return x
