@@ -8,6 +8,18 @@ def resnet32():
             units=[5, 5, 5],
             filters=[16, 16, 32, 64],
             strides=[1, 2, 2],
-            classes=32
+            classes=10
             )
+    model.name = "resnet32"
+    return model
+
+
+def resnet56():
+    model = ResNet(
+            units=[9, 9, 9],
+            filters=[16, 16, 32, 64],
+            strides=[1, 2, 2],
+            classes=10
+            )
+    model.name = "resnet56"
     return model

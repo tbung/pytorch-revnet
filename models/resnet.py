@@ -73,6 +73,7 @@ class ResNet(nn.Module):
             Wether to use the bottleneck residual or the basic residual
         """
         super(ResNet, self).__init__()
+        self.name = self.__class__.__name__
 
         if bottleneck:
             self.Residual = Bottleneck
