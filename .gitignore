@@ -1,4 +1,5 @@
 /data/
+/checkpoints/
 loss.pdf
 
 # Created by https://www.gitignore.io/api/c,vim,git,c++,linux,python,windows
