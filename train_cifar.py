@@ -19,7 +19,7 @@ import models
 # Check if CUDA is avaliable
 CUDA = torch.cuda.is_available()
 
-model = models.resnet32()
+model = models.resnet34()
 
 if CUDA:
     model.cuda()
