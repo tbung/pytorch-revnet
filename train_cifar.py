@@ -1,3 +1,10 @@
+from datetime import datetime
+
+import glob
+import os
+
+from tqdm import tqdm
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -5,7 +12,7 @@ import torchvision
 import torchvision.transforms as transforms
 
 from torch.autograd import Variable
-from torch.optim.lr_scheduler import StepLR
+from torch.optim.lr_scheduler import MultiStepLR
 
 import models
 
@@ -46,19 +53,15 @@ classes = ('plane', 'car', 'bird', 'cat',
            'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
 
 
-def train():
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.SGD(model.parameters(), lr=1,
-                          momentum=0.9, weight_decay=0.0001)
-    scheduler = StepLR(optimizer, step_size=25, gamma=0.1)
-    losses = []
+criterion = nn.CrossEntropyLoss()
+optimizer = optim.SGD(model.parameters(), lr=1,
+                      momentum=0.9, weight_decay=0.0001)
+scheduler = MultiStepLR(optimizer, milestones=[150, 250, 350], gamma=0.1)
+# losses = []
 
-    for epoch in range(80):  # loop over the dataset multiple times
-        scheduler.step()
 
-        running_loss = 0.0
-
-        for i, data in enumerate(trainloader, 0):
+def train(epoch):
+        for i, data in enumerate(tqdm(trainloader, ascii=True, desc='{:03d}'.format(epoch))):
             # get the inputs
             inputs, labels = data
 
@@ -77,31 +80,29 @@ def train():
             loss.backward()
             optimizer.step()
 
-            losses.append(loss.data[0])
-
             # print statistics
-            running_loss += loss.data[0]
-            if i % 100 == 99:    # print every 2000 mini-batches
-                print('[{0}, {1}] loss: {2:.4f}'.format(
-                      epoch + 1, i + 1, running_loss / 100
-                      ))
-                running_loss = 0.0
+            # running_loss += loss.data[0]
+            # if i % 100 == 99:    # print every 2000 mini-batches
+            #     print('[{0}, {1}] loss: {2:.4f}'.format(
+            #           epoch + 1, i + 1, running_loss / 100
+            #           ))
+            #     running_loss = 0.0
 
     # # plot training loss
     # plt.figure()
     # plt.plot(range(len(losses)), losses)
     # plt.savefig('loss.pdf')
 
-    torch.save(model.state_dict(), "cifar_{}.dat".format("test"))
-
-    print('Finished Training')
-
 
 def load(path):
     model.load_state_dict(torch.load(path))
 
 
+best_acc = 0
+
+
 def test():
+    global best_acc
     correct = 0
     total = 0
     for data in testloader:
@@ -113,30 +114,25 @@ def test():
         total += labels.size(0)
         correct += (predicted == labels).sum()
 
-    print('Accuracy of the network on the 10000 test images: {}\%'.format(
-        100 * correct / total))
+    acc = 100 * correct / total
 
-    class_correct = list(0. for i in range(10))
-    class_total = list(0. for i in range(10))
-    for data in testloader:
-        images, labels = data
-        if CUDA:
-            images, labels = images.cuda(), labels.cuda()
-        outputs = model(Variable(images))
-        _, predicted = torch.max(outputs.data, 1)
-        c = (predicted == labels).squeeze()
-        for i in range(4):
-            label = labels[i]
-            class_correct[label] += c[i]
-            class_total[label] += 1
-
-    for i in range(10):
-        print('Accuracy of {0} : {1}\%'.format(
-            classes[i], 100 *
-            class_correct[i] /
-            class_total[i]))
+    if acc > best_acc:
+        best_acc = acc
+        if not os.path.isdir('checkpoints'):
+            os.mkdir('checkpoints')
+        torch.save(model.state_dict(),
+                   "./checkpoints/cifar_{0}_{1}.dat".format(model.name,
+                       datetime.now().isoformat(timespec='seconds')))
+    print('Accuracy: {}%'.format(acc))
 
 
 if __name__ == "__main__":
-    train()
+    for epoch in range(350):  # loop over the dataset multiple times
+        scheduler.step()
+        train(epoch)
+        test()
+
+    checkpoints = glob.glob('./checkpoints/*{}*'.format(model.name))
+    latest = max(checkpoints, key=os.path.getctime)
+    load(latest)
     test()
