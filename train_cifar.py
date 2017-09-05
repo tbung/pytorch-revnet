@@ -52,7 +52,9 @@ classes = ('plane', 'car', 'bird', 'cat',
 
 
 def train(epoch, model, criterion, optimizer):
-        for i, data in enumerate(tqdm(trainloader, ascii=True, desc='{:03d}'.format(epoch))):
+        for i, data in enumerate(tqdm(trainloader,
+                                      ascii=True,
+                                      desc='{:03d}'.format(epoch))):
             # get the inputs
             inputs, labels = data
 
@@ -98,6 +100,15 @@ def load_latest(model):
     load(model, latest)
 
 
+def checkpoint(model):
+    if CUDA:
+        model.cpu()
+    torch.save(model.state_dict(),
+               "./checkpoints/cifar_{0}_{1:%Y-%m-%d}_{1:%H-%M-%S}.dat".format(model.name,
+               datetime.now()))
+    if CUDA:
+        model.cuda()
+
 
 best_acc = 0
 
@@ -121,9 +132,7 @@ def test(model):
         best_acc = acc
         if not os.path.isdir('checkpoints'):
             os.mkdir('checkpoints')
-        torch.save(model.state_dict(),
-                   "./checkpoints/cifar_{0}_{1}.dat".format(model.name,
-                   datetime.now().isoformat(timespec='seconds')))
+        checkpoint(model)
     print('Accuracy: {}%'.format(acc))
 
 
