@@ -2,6 +2,7 @@ from datetime import datetime
 
 import glob
 import os
+import argparse
 
 from tqdm import tqdm
 
@@ -18,12 +19,6 @@ import models
 
 # Check if CUDA is avaliable
 CUDA = torch.cuda.is_available()
-
-model = models.resnet34()
-
-if CUDA:
-    model.cuda()
-
 
 # Prepare our data set
 batch_size = 128
@@ -53,14 +48,10 @@ classes = ('plane', 'car', 'bird', 'cat',
            'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
 
 
-criterion = nn.CrossEntropyLoss()
-optimizer = optim.SGD(model.parameters(), lr=1,
-                      momentum=0.9, weight_decay=0.0001)
-scheduler = MultiStepLR(optimizer, milestones=[150, 250, 350], gamma=0.1)
 # losses = []
 
 
-def train(epoch):
+def train(epoch, model, criterion, optimizer):
         for i, data in enumerate(tqdm(trainloader, ascii=True, desc='{:03d}'.format(epoch))):
             # get the inputs
             inputs, labels = data
@@ -94,14 +85,24 @@ def train(epoch):
     # plt.savefig('loss.pdf')
 
 
-def load(path):
-    model.load_state_dict(torch.load(path))
+def load(model, path):
+    if path == "latest":
+        load_latest(model)
+    else:
+        model.load_state_dict(torch.load(path))
+
+
+def load_latest(model):
+    checkpoints = glob.glob('./checkpoints/*{}*'.format(model.name))
+    latest = max(checkpoints, key=os.path.getctime)
+    load(model, latest)
+
 
 
 best_acc = 0
 
 
-def test():
+def test(model):
     global best_acc
     correct = 0
     total = 0
@@ -122,17 +123,38 @@ def test():
             os.mkdir('checkpoints')
         torch.save(model.state_dict(),
                    "./checkpoints/cifar_{0}_{1}.dat".format(model.name,
-                       datetime.now().isoformat(timespec='seconds')))
+                   datetime.now().isoformat(timespec='seconds')))
     print('Accuracy: {}%'.format(acc))
 
 
 if __name__ == "__main__":
-    for epoch in range(350):  # loop over the dataset multiple times
-        scheduler.step()
-        train(epoch)
-        test()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model")
+    parser.add_argument("--load")
+    parser.add_argument("--test", action="store_true")
+    args = parser.parse_args()
 
-    checkpoints = glob.glob('./checkpoints/*{}*'.format(model.name))
-    latest = max(checkpoints, key=os.path.getctime)
-    load(latest)
-    test()
+    model = getattr(models, args.model)()
+
+    if CUDA:
+        model.cuda()
+
+    if args.load is not None:
+        load(model, args.load)
+
+    if not args.test:
+        criterion = nn.CrossEntropyLoss()
+        optimizer = optim.SGD(model.parameters(), lr=1,
+                              momentum=0.9, weight_decay=0.0001)
+        scheduler = MultiStepLR(optimizer, milestones=[150, 250, 350],
+                                gamma=0.1)
+
+        for epoch in range(350):  # loop over the dataset multiple times
+            scheduler.step()
+            train(epoch, model, criterion, optimizer)
+            test(model)
+
+        load_latest(model)
+        test(model)
+    else:
+        test(model)
