@@ -91,7 +91,8 @@ class ResNet(nn.Module):
                                              stride=strides[i]))
 
             for unit in range(1, group):
-                self.layers.append(self.Residual(filters[i + 1], filters[i + 1]))
+                self.layers.append(self.Residual(filters[i + 1],
+                                                 filters[i + 1]))
 
         self.fc = nn.Linear(filters[-1], classes)
 
