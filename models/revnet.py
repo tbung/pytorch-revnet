@@ -30,13 +30,17 @@ class RevBlockFunction(Function):
 
         x1, x2 = Variable(x1), Variable(x2)
 
+        f_x2 = f(x2)
+
         if in_channels < out_channels:
             pad = Variable(torch.zeros(x1.size(0),
                                        (out_channels//2 - in_channels//2) // 2,
                                        x1.size(2), x1.size(3)))
 
             x1_ = torch.cat([pad, x1], dim=1)
+            print(x1_.size())
             x1_ = torch.cat([x1_, pad], dim=1)
+            print(x1_.size())
 
             pad = Variable(torch.zeros(x2.size(0),
                                        (out_channels//2 - in_channels//2) // 2,
@@ -47,11 +51,6 @@ class RevBlockFunction(Function):
 
         else:
             x1_, x2_ = x1, x2
-
-
-        print(x1_.size())
-
-        f_x2 = f(x2_)
 
         y1 = f_x2 + x1_
 
@@ -82,7 +81,8 @@ class RevBlock(nn.Module):
         self.g = Block(out_channels // 2, out_channels // 2, stride=1)
 
     def forward(self, x):
-        return RevBlockFunction.apply(x, self.f, self.g, self.in_channels, self.out_channels)
+        return RevBlockFunction.apply(x, self.f, self.g,
+                                      self.in_channels, self.out_channels)
 
 
 class RevBottleneck(nn.Module):
@@ -100,8 +100,9 @@ class RevGroupFunction(Function):
 
     @staticmethod
     def backward(ctx, grad_out):
-        output = ctx.saved_variables
+        # output = ctx.saved_variables
         # TODO
+        pass
 
 
 class RevNet(nn.Module):

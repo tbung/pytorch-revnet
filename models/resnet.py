@@ -1,17 +1,39 @@
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+from torch.autograd import Variable
+
+
+def _possible_downsample(x, in_channels, out_channels, stride=1):
+    if stride != 1:
+        pass
+
+    if in_channels < out_channels:
+        pad = Variable(torch.zeros(x.size(0),
+                                   (out_channels - in_channels) // 2,
+                                   x.size(2), x.size(3)))
+
+        x = torch.cat([pad, x], dim=1)
+        x = torch.cat([x, pad], dim=1)
+
+    return x
 
 
 class Block(nn.Module):
     def __init__(self, in_channels, out_channels, stride=1):
         super(Block, self).__init__()
 
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.stride = stride
+
         self.stride = stride
 
         self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3,
                                padding=1, stride=stride)
 
-        self.bn1 = nn.BatchNorm2d(out_channels)
+        self.bn1 = nn.BatchNorm2d(in_channels)
 
         self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3,
                                padding=1)
@@ -30,11 +52,14 @@ class Block(nn.Module):
     def forward(self, x):
         orig_x = x
 
-        out = F.relu(self.bn1(self.conv1(x)))
+        out = self.conv1(F.relu(self.bn1(x)))
 
         orig_x = self.res(orig_x)
 
-        out = F.relu(self.bn2(self.conv2(out)) + orig_x)
+        out = self.conv2(F.relu(self.bn2(out)))
+
+        out += _possible_downsample(orig_x, self.in_channels,
+                                    self.out_channels, self.stride)
 
         return out
 
