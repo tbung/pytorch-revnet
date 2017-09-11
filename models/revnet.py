@@ -4,53 +4,20 @@ import torch.nn.functional as F
 
 from torch.autograd import Function, Variable
 
-from .resnet import Block, Bottleneck
-
-
-# class BlockFunction(Function):
-#     @staticmethod
-#     def forward(ctx, input, w1, w2, b1, b2, running_mean1, running_var1,
-#                 running_mean2, running_var2, stride=1):
-#         output = F.conv_2d(input, w1, bias=b1, stride=stride, padding=1)
-#         output = F.batch_norm(output, running_mean1, running_var1)
-#         output = F.relu(output)
-#         output = F.conv_2d(input, w2, bias=b2, stride=stride, padding=1)
-#         output = F.batch_norm(output, running_mean2, running_var2)
-#         output += input
-#         output = F.relu(output)
-#         return output
+from .resnet import Block, Bottleneck, _possible_downsample
 
 
 class RevBlockFunction(Function):
     @staticmethod
     def forward(ctx, input, f, g, in_channels, out_channels, bottleneck=False):
         x1, x2 = torch.chunk(input, 2, dim=1)
-        print(input.size())
-        print(x1.size())
 
         x1, x2 = Variable(x1), Variable(x2)
 
         f_x2 = f(x2)
 
-        if in_channels < out_channels:
-            pad = Variable(torch.zeros(x1.size(0),
-                                       (out_channels//2 - in_channels//2) // 2,
-                                       x1.size(2), x1.size(3)))
-
-            x1_ = torch.cat([pad, x1], dim=1)
-            print(x1_.size())
-            x1_ = torch.cat([x1_, pad], dim=1)
-            print(x1_.size())
-
-            pad = Variable(torch.zeros(x2.size(0),
-                                       (out_channels//2 - in_channels//2) // 2,
-                                       x2.size(2), x2.size(3)))
-
-            x2_ = torch.cat([pad, x2], dim=1)
-            x2_ = torch.cat([x2_, pad], dim=1)
-
-        else:
-            x1_, x2_ = x1, x2
+        x1_ = _possible_downsample(x1, in_channels, out_channels)
+        x2_ = _possible_downsample(x2, in_channels, out_channels)
 
         y1 = f_x2 + x1_
 
@@ -74,11 +41,11 @@ class RevBlock(nn.Module):
     def __init__(self, in_channels, out_channels, stride=1):
         super(RevBlock, self).__init__()
 
-        self.in_channels = in_channels
-        self.out_channels = out_channels
+        self.in_channels = in_channels // 2
+        self.out_channels = out_channels // 2
 
-        self.f = Block(in_channels // 2, out_channels // 2, stride)
-        self.g = Block(out_channels // 2, out_channels // 2, stride=1)
+        self.f = Block(self.in_channels, self.out_channels, stride)
+        self.g = Block(self.out_channels, self.out_channels, stride=1)
 
     def forward(self, x):
         return RevBlockFunction.apply(x, self.f, self.g,
