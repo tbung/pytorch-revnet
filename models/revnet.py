@@ -10,7 +10,7 @@ from .resnet import Block, Bottleneck, _possible_downsample
 class RevBlockFunction(Function):
     @staticmethod
     def forward(ctx, input, f, g, in_channels, out_channels, bottleneck=False):
-        x1, x2 = torch.chunk(input, 2, dim=1)
+        x1, x2 = input.chunk(2, dim=1)
 
         x1, x2 = Variable(x1), Variable(x2)
 
@@ -30,11 +30,43 @@ class RevBlockFunction(Function):
         return y
 
     @staticmethod
-    def backward(output, grad_out, f, g):
-        # y, f, g = ctx.saved_variables
+    def backward(output, grad_out, f, g, in_channels, out_channels):
+        y1, y2 = Variable.chunk(output, 2, dim=1)
+        dy1, dy2 = Variable.chunk(grad_out, 2, dim=1)
+        
+        x2 = y2 - g(y1)
 
-        # y1, y2 = torch.chunk(y, 2, dim=3)
-        pass
+        x1 = y1 - f(x2)
+
+        f_x2 = f(x2)
+
+        x1_ = _possible_downsample(x1, in_channels, out_channels)
+        x2_ = _possible_downsample(x2, in_channels, out_channels)
+
+        y1_ = f_x2 + x1_
+
+        g_y1 = g(y1_)
+
+        y2_ = g_y1 + x2_
+
+        print("test 1")
+
+        dd1 = torch.autograd.grad(y2_, [y1_] + list(g.parameters()), dy2)
+        dy2_y1 = dd1[0]
+        dy1_plus = dy2_y1 + dy1
+        dgw = dd1[1:]
+        dd2 = torch.autograd.grad(y1_, [x1, x2] + list(f.parameters()), dy1_plus)
+        dx1 = dd2[0]
+        dx2 = dd2[1]
+        dfw = dd2[2:]
+        dx2 += torch.autograd.grad(x2_, x2, dy2)[0]
+
+        x = torch.cat((x1, x2), 1)
+        dx = torch.cat((dx1, dx2), 1)
+
+        print("test 2")
+
+        return x, dx, dfw, dgw
 
 
 class RevBlock(nn.Module):
@@ -63,13 +95,26 @@ class RevGroupFunction(Function):
             input = module(input)
 
         ctx.save_for_backward(input.data)
+        ctx._modules = modules
         return input.data
 
     @staticmethod
     def backward(ctx, grad_out):
-        # output = ctx.saved_variables
-        # TODO
-        pass
+        output = ctx.saved_variables[0]
+
+        grad_modules = []
+        
+        for module in reversed(ctx._modules):
+            output, grad_out, grad_wf, grad_wg = RevBlockFunction.backward(
+                                                         output, grad_out,
+                                                         module._modules['f'],
+                                                         module._modules['g'],
+                                                         module.in_channels,
+                                                         module.out_channels)
+            grad_modules.append(grad_wf)
+            grad_modules.append(grad_wg)
+
+        return grad_out, grad_modules
 
 
 class RevNet(nn.Module):
