@@ -33,7 +33,7 @@ class RevBlockFunction(Function):
     def backward(output, grad_out, f, g, in_channels, out_channels):
         y1, y2 = Variable.chunk(output, 2, dim=1)
         dy1, dy2 = Variable.chunk(grad_out, 2, dim=1)
-        
+
         x2 = y2 - g(y1)
 
         x1 = y1 - f(x2)
@@ -55,7 +55,8 @@ class RevBlockFunction(Function):
         dy2_y1 = dd1[0]
         dy1_plus = dy2_y1 + dy1
         dgw = dd1[1:]
-        dd2 = torch.autograd.grad(y1_, [x1, x2] + list(f.parameters()), dy1_plus)
+        dd2 = torch.autograd.grad(y1_, [x1, x2] + list(f.parameters()),
+                                  dy1_plus)
         dx1 = dd2[0]
         dx2 = dd2[1]
         dfw = dd2[2:]
@@ -103,7 +104,7 @@ class RevGroupFunction(Function):
         output = ctx.saved_variables[0]
 
         grad_modules = []
-        
+
         for module in reversed(ctx._modules):
             output, grad_out, grad_wf, grad_wg = RevBlockFunction.backward(
                                                          output, grad_out,
