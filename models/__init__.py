@@ -1,6 +1,7 @@
 from .resnet import ResNet
+from .revnet import RevNet
 
-__all__ = ["ResNet", "resnet32", "resnet34"]
+__all__ = ["ResNet", "resnet32", "resnet34", "revnet38"]
 
 
 def resnet32():
@@ -32,4 +33,15 @@ def resnet56():
             classes=10
             )
     model.name = "resnet56"
+    return model
+
+
+def revnet38():
+    model = RevNet(
+            units=[3, 3, 3],
+            filters=[32, 32, 64, 112],
+            strides=[1, 2, 2],
+            classes=10
+            )
+    model.name = "revnet38"
     return model

@@ -6,18 +6,20 @@ from torch.autograd import Variable
 
 
 def _possible_downsample(x, in_channels, out_channels, stride=1):
-    if stride != 1:
-        pass
+    if stride > 1:
+        x = F.avg_pool2d(x, stride, stride)
 
     if in_channels < out_channels:
         pad = Variable(torch.zeros(x.size(0),
                                    (out_channels - in_channels) // 2,
-                                   x.size(2), x.size(3)))
+                                   x.size(2), x.size(3))).cuda()
 
-        x = torch.cat([pad, x], dim=1)
-        x = torch.cat([x, pad], dim=1)
+        temp = torch.cat([pad, x], dim=1)
+        out = torch.cat([temp, pad], dim=1)
+    else:
+        out = x + Variable(torch.zeros_like(x.data)).cuda()
 
-    return x
+    return out
 
 
 class Block(nn.Module):
@@ -40,21 +42,11 @@ class Block(nn.Module):
 
         self.bn2 = nn.BatchNorm2d(out_channels)
 
-        if stride != 1:
-            self.res = nn.Sequential(
-                    nn.Conv2d(in_channels, out_channels, kernel_size=1,
-                              stride=stride, bias=False),
-                    nn.BatchNorm2d(out_channels)
-                    )
-        else:
-            self.res = lambda x: x
-
     def forward(self, x):
+        x = x.contiguous()
         orig_x = x
 
         out = self.conv1(F.relu(self.bn1(x)))
-
-        orig_x = self.res(orig_x)
 
         out = self.conv2(F.relu(self.bn2(out)))
 

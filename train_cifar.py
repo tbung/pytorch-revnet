@@ -27,6 +27,8 @@ parser.add_argument("-e", "--evaluate", action="store_true",
                     help="evaluate model on validation set")
 parser.add_argument("--batch-size", default=128, type=int,
                     help="size of the mini-batches")
+parser.add_argument("--epochs", default=300, type=int,
+                    help="number of epochs")
 
 
 # Check if CUDA is avaliable
@@ -51,7 +53,8 @@ def main():
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(model.parameters(), lr=1,
                           momentum=0.9, weight_decay=0.0001)
-    scheduler = MultiStepLR(optimizer, milestones=[150, 250, 350],
+    step_size = args.epochs // 3
+    scheduler = MultiStepLR(optimizer, milestones=[step_size, step_size*2],
                             gamma=0.1)
 
     # Load data
@@ -82,7 +85,7 @@ def main():
         validate(model)
         return
 
-    for epoch in range(350):  # loop over the dataset multiple times
+    for epoch in range(args.epochs):  # loop over the dataset multiple times
         scheduler.step()
         train(epoch, model, criterion, optimizer, trainloader)
         acc = validate(model, valloader)
