@@ -16,6 +16,7 @@ from torch.autograd import Variable
 from torch.optim.lr_scheduler import MultiStepLR
 
 import models
+from resnet import ResNet18
 
 
 parser = argparse.ArgumentParser()
@@ -42,7 +43,8 @@ def main():
 
     args = parser.parse_args()
 
-    model = getattr(models, args.model)()
+    # model = getattr(models, args.model)()
+    model = ResNet18()
 
     if CUDA:
         model.cuda()
@@ -54,7 +56,7 @@ def main():
     optimizer = optim.SGD(model.parameters(), lr=1,
                           momentum=0.9, weight_decay=0.0001)
     step_size = args.epochs // 3
-    scheduler = MultiStepLR(optimizer, milestones=[step_size, step_size*2],
+    scheduler = MultiStepLR(optimizer, milestones=[50, 100, 150],
                             gamma=0.1)
 
     # Load data
@@ -94,36 +96,40 @@ def main():
             best_acc = acc
             if not os.path.isdir('checkpoints'):
                 os.mkdir('checkpoints')
-            save_checkpoint(model)
+            # save_checkpoint(model)
         print('Accuracy: {}%'.format(acc))
 
 
 def train(epoch, model, criterion, optimizer, trainloader):
-        for i, data in enumerate(tqdm(trainloader,
-                                      ascii=True,
-                                      desc='{:03d}'.format(epoch))):
-            # get the inputs
-            inputs, labels = data
+    # model.train()
+    for i, data in enumerate(tqdm(trainloader,
+                                  ascii=True,
+                                  desc='{:03d}'.format(epoch))):
+        # get the inputs
+        inputs, labels = data
 
-            if CUDA:
-                inputs, labels = inputs.cuda(), labels.cuda()
+        if CUDA:
+            inputs, labels = inputs.cuda(), labels.cuda()
 
-            # wrap them in Variable
-            inputs, labels = Variable(inputs), Variable(labels)
+        # wrap them in Variable
+        inputs, labels = Variable(inputs), Variable(labels)
 
-            # zero the parameter gradients
-            optimizer.zero_grad()
+        # zero the parameter gradients
+        optimizer.zero_grad()
 
-            # forward + backward + optimize
-            outputs = model(inputs)
-            loss = criterion(outputs, labels)
-            loss.backward()
-            optimizer.step()
+        # forward + backward + optimize
+        outputs = model(inputs)
+        loss = criterion(outputs, labels)
+        loss.backward()
+        optimizer.step()
 
 
 def validate(model, valloader):
     correct = 0
     total = 0
+
+    # model.eval()
+
     for data in valloader:
         images, labels = data
         if CUDA:
@@ -132,6 +138,7 @@ def validate(model, valloader):
         _, predicted = torch.max(outputs.data, 1)
         total += labels.size(0)
         correct += (predicted == labels).sum()
+        print(predicted[0])
 
     acc = 100 * correct / total
 
