@@ -12,12 +12,12 @@ def _possible_downsample(x, in_channels, out_channels, stride=1):
     if in_channels < out_channels:
         pad = Variable(torch.zeros(x.size(0),
                                    (out_channels - in_channels) // 2,
-                                   x.size(2), x.size(3))).cuda()
+                                   x.size(2), x.size(3)))
 
         temp = torch.cat([pad, x], dim=1)
         out = torch.cat([temp, pad], dim=1)
     else:
-        out = x + Variable(torch.zeros_like(x.data)).cuda()
+        out = x + Variable(torch.zeros_like(x.data))
 
     return out
 
@@ -35,7 +35,7 @@ class Block(nn.Module):
         self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3,
                                padding=1, stride=stride)
 
-        self.bn1 = nn.BatchNorm2d(in_channels)
+        self.bn1 = nn.BatchNorm2d(out_channels)
 
         self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3,
                                padding=1)
@@ -43,15 +43,16 @@ class Block(nn.Module):
         self.bn2 = nn.BatchNorm2d(out_channels)
 
     def forward(self, x):
-        x = x.contiguous()
         orig_x = x
 
-        out = self.conv1(F.relu(self.bn1(x)))
+        out = F.relu(self.bn1(self.conv1(x)))
 
-        out = self.conv2(F.relu(self.bn2(out)))
+        out = self.bn2(self.conv2(out))
 
         out += _possible_downsample(orig_x, self.in_channels,
                                     self.out_channels, self.stride)
+
+        out = F.relu(out)
 
         return out
 
