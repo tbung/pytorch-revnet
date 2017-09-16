@@ -16,7 +16,7 @@ from torch.autograd import Variable
 from torch.optim.lr_scheduler import MultiStepLR
 
 import models
-from resnet import ResNet18
+import models.revnet as revnet
 
 
 parser = argparse.ArgumentParser()
@@ -28,8 +28,10 @@ parser.add_argument("-e", "--evaluate", action="store_true",
                     help="evaluate model on validation set")
 parser.add_argument("--batch-size", default=128, type=int,
                     help="size of the mini-batches")
-parser.add_argument("--epochs", default=300, type=int,
+parser.add_argument("--epochs", default=200, type=int,
                     help="number of epochs")
+parser.add_argument("--lr", default=0.1, type=float,
+                    help="initial learning rate")
 
 
 # Check if CUDA is avaliable
@@ -43,8 +45,7 @@ def main():
 
     args = parser.parse_args()
 
-    # model = getattr(models, args.model)()
-    model = ResNet18()
+    model = getattr(models, args.model)()
 
     if CUDA:
         model.cuda()
@@ -53,21 +54,28 @@ def main():
         load(model, args.load)
 
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.SGD(model.parameters(), lr=1,
+    optimizer = optim.SGD(model.parameters(), lr=args.lr,
                           momentum=0.9, weight_decay=0.0001)
-    step_size = args.epochs // 3
+    # step_size = args.epochs // 
     scheduler = MultiStepLR(optimizer, milestones=[50, 100, 150],
                             gamma=0.1)
 
     # Load data
-    transform = transforms.Compose([
+    transform_train = transforms.Compose([
+        transforms.RandomCrop(32, padding=4),
+        transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
-        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+    ])
+
+    transform_test = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
     ])
 
     trainset = torchvision.datasets.CIFAR10(
         root='./data', train=True,
-        download=True, transform=transform
+        download=True, transform=transform_train
     )
 
     trainloader = torch.utils.data.DataLoader(trainset,
@@ -76,7 +84,7 @@ def main():
 
     testset = torchvision.datasets.CIFAR10(
         root='./data', train=False,
-        download=True, transform=transform
+        download=True, transform=transform_test
     )
 
     valloader = torch.utils.data.DataLoader(testset,
@@ -96,7 +104,7 @@ def main():
             best_acc = acc
             if not os.path.isdir('checkpoints'):
                 os.mkdir('checkpoints')
-            # save_checkpoint(model)
+            save_checkpoint(model)
         print('Accuracy: {}%'.format(acc))
 
 
@@ -121,6 +129,7 @@ def train(epoch, model, criterion, optimizer, trainloader):
         outputs = model(inputs)
         loss = criterion(outputs, labels)
         loss.backward()
+        revnet.free()
         optimizer.step()
 
 
@@ -138,7 +147,6 @@ def validate(model, valloader):
         _, predicted = torch.max(outputs.data, 1)
         total += labels.size(0)
         correct += (predicted == labels).sum()
-        print(predicted[0])
 
     acc = 100 * correct / total
 

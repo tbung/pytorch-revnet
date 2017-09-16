@@ -4,23 +4,9 @@ import torch.nn.functional as F
 
 from torch.autograd import Variable
 
+from .revnet import possible_downsample
 
-def _possible_downsample(x, in_channels, out_channels, stride=1):
-    if stride > 1:
-        x = F.avg_pool2d(x, stride, stride)
-
-    if in_channels < out_channels:
-        pad = Variable(torch.zeros(x.size(0),
-                                   (out_channels - in_channels) // 2,
-                                   x.size(2), x.size(3)))
-
-        temp = torch.cat([pad, x], dim=1)
-        out = torch.cat([temp, pad], dim=1)
-    else:
-        out = x + Variable(torch.zeros_like(x.data))
-
-    return out
-
+CUDA = torch.cuda.is_available()
 
 class Block(nn.Module):
     def __init__(self, in_channels, out_channels, stride=1):
@@ -49,7 +35,7 @@ class Block(nn.Module):
 
         out = self.bn2(self.conv2(out))
 
-        out += _possible_downsample(orig_x, self.in_channels,
+        out += possible_downsample(orig_x, self.in_channels,
                                     self.out_channels, self.stride)
 
         out = F.relu(out)
