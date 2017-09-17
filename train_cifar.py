@@ -54,23 +54,28 @@ def main():
         load(model, args.load)
 
     criterion = nn.CrossEntropyLoss()
+
     optimizer = optim.SGD(model.parameters(), lr=args.lr,
                           momentum=0.9, weight_decay=0.0001)
-    # step_size = args.epochs // 
+
     scheduler = MultiStepLR(optimizer, milestones=[50, 100, 150],
                             gamma=0.1)
+
+    print("Prepairing data...")
 
     # Load data
     transform_train = transforms.Compose([
         transforms.RandomCrop(32, padding=4),
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
-        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        transforms.Normalize((0.4914, 0.4822, 0.4465),
+                             (0.2023, 0.1994, 0.2010)),
     ])
 
     transform_test = transforms.Compose([
         transforms.ToTensor(),
-        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        transforms.Normalize((0.4914, 0.4822, 0.4465),
+                             (0.2023, 0.1994, 0.2010)),
     ])
 
     trainset = torchvision.datasets.CIFAR10(
@@ -95,6 +100,7 @@ def main():
         validate(model)
         return
 
+    print("\nTraining model...")
     for epoch in range(args.epochs):  # loop over the dataset multiple times
         scheduler.step()
         train(epoch, model, criterion, optimizer, trainloader)
@@ -109,10 +115,12 @@ def main():
 
 
 def train(epoch, model, criterion, optimizer, trainloader):
-    # model.train()
-    for i, data in enumerate(tqdm(trainloader,
-                                  ascii=True,
-                                  desc='{:03d}'.format(epoch))):
+    model.train()
+    train_loss = 0
+    correct = 0
+    total = 0
+    t = tqdm(trainloader, ascii=True, desc='{:03d}'.format(epoch))
+    for i, data in enumerate(t):
         # get the inputs
         inputs, labels = data
 
@@ -132,18 +140,27 @@ def train(epoch, model, criterion, optimizer, trainloader):
         revnet.free()
         optimizer.step()
 
+        train_loss += loss.data[0]
+        _, predicted = torch.max(outputs.data, 1)
+        total += labels.size(0)
+        correct += predicted.eq(labels.data).cpu().sum()
+
+        t.set_postfix(loss=train_loss/(i+1),
+                      acc='{:2.1f}%'.format(100*correct/total))
+
 
 def validate(model, valloader):
     correct = 0
     total = 0
 
-    # model.eval()
+    model.eval()
 
     for data in valloader:
         images, labels = data
         if CUDA:
             images, labels = images.cuda(), labels.cuda()
         outputs = model(Variable(images))
+        revnet.free()
         _, predicted = torch.max(outputs.data, 1)
         total += labels.size(0)
         correct += (predicted == labels).sum()
