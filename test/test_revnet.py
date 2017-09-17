@@ -40,9 +40,10 @@ class TestRevNet(TestCase):
         # g.view()
 
     def test_grad(self):
-        auto_grad = torch.autograd.grad(self.output, self.input,
+        auto_grad = torch.autograd.grad(self.output, [self.input] +
+                                        self.net.f_params + self.net.g_params,
                                         Variable(torch.ones(3, 4, 3, 3),
-                                                 requires_grad=True))[0]
+                                                 requires_grad=True))
 
         manual_grad = revnet.RevBlockFunction._inner_grad(
                                     self.input.data,
@@ -54,9 +55,12 @@ class TestRevNet(TestCase):
                                     self.net.f_params,
                                     list(self.net._buffers.values())[:4],
                                     self.net.g_params,
-                                    list(self.net._buffers.values())[4:])[0]
+                                    list(self.net._buffers.values())[4:])
 
-        self.assertEqual(auto_grad, manual_grad)
+        manual_grad = [manual_grad[0]] + [v for sub in manual_grad[1:]
+                                          for v in sub]
+        for auto, manual in zip(auto_grad, manual_grad):
+            self.assertEqual(auto, manual)
 
     def test_recreation(self):
         self.assertEqual(self.input.data, self.rec_input)
