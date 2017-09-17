@@ -101,7 +101,9 @@ def main():
                                             shuffle=False, num_workers=2)
 
     if args.evaluate:
-        validate(model)
+        print("\nEvaluating model...")
+        acc = validate(model, valloader)
+        print('Accuracy: {}%'.format(acc))
         return
 
     print("\nTraining model...")
