@@ -1,3 +1,5 @@
+import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -266,8 +268,8 @@ class RevBlock(nn.Module):
         self.reset_parameters()
 
     def reset_parameters(self):
-        f_stdv = self.in_channels * 3 * 3
-        g_stdv = self.out_channels * 3 * 3
+        f_stdv = 1 / math.sqrt(self.in_channels * 3 * 3)
+        g_stdv = 1 / math.sqrt(self.out_channels * 3 * 3)
 
         self._parameters['f_w1'].data.uniform_(-f_stdv, f_stdv)
         self._parameters['f_b1'].data.uniform_(-f_stdv, f_stdv)

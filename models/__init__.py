@@ -14,6 +14,7 @@ def resnet32():
     model.name = "resnet32"
     return model
 
+
 def resnet34():
     model = ResNet(
             units=[3, 4, 6, 3],
