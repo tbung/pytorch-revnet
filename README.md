@@ -14,3 +14,10 @@ progress bar.
 The unittests require the TestCase implemented by the PyTorch project. The
 module can be downloaded
 [here](https://github.com/pytorch/pytorch/blob/master/test/common.py).
+
+## Results
+
+| Model    | Accuracy | Memory Usage | Params |
+|----------|----------|--------------|--------|
+| resnet32 |          |              | 0.47 M |
+| revnet38 | 87.96%   | 660 MB       | 0.47 M |
