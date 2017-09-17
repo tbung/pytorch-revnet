@@ -1,93 +1,66 @@
-from collections import OrderedDict
-import visualize
 import torch
-import torch.nn as nn
-import torch.optim as optim
-import torchvision
-import torchvision.transforms as transforms
-from torch.autograd import Variable, gradcheck
-from models.revnet import RevNet, residual, RevBlockFunction
+import torch.autograd
+from torch.autograd import Variable
 
-transform = transforms.Compose(
-    [transforms.ToTensor(),
-     transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+# import visualize
 
-trainset = torchvision.datasets.CIFAR10(root='./data', train=True,
-                                        download=True, transform=transform)
-trainloader = torch.utils.data.DataLoader(trainset, batch_size=4,
-                                          shuffle=True, num_workers=2)
+import models.revnet as revnet
 
-test = RevNet([3], [16, 16], [2], 10)
-dataiter = iter(trainloader)
-images, labels = dataiter.next()
-output = test(Variable(images))
-_, predicted = torch.max(output.data, 1)
-print(predicted)
-# g = visualize.make_dot(output)
-# g.view()
+import unittest
 
-criterion = nn.CrossEntropyLoss()
-optimizer = optim.SGD(test.parameters(), lr=0.1,
-                      momentum=0.9, weight_decay=0.0001)
+from common import TestCase
 
-loss = criterion(output, Variable(labels))
-loss.backward()
-# optimizer.step()
 
-# crit = nn.L1Loss()
-# test = Variable(torch.rand(3,3,3,3))
-# target = Variable(torch.rand(3,3,3,3))
+class TestRevNet(TestCase):
+    def setUp(self):
+        self.input = Variable(torch.rand(3, 4, 3, 3), requires_grad=True)
+        self.in_channels = 4
+        self.out_channels = 4
+        self.training = True
+        self.net = revnet.RevBlock(self.in_channels, self.out_channels)
+        self.output = revnet.RevBlockFunction._inner(
+                                        self.input,
+                                        self.in_channels,
+                                        self.out_channels,
+                                        self.training,
+                                        1,
+                                        self.net.f_params,
+                                        list(self.net._buffers.values())[:4],
+                                        self.net.g_params,
+                                        list(self.net._buffers.values())[4:],
+                                        manual_grads=False)
+        self.rec_input = revnet.RevBlockFunction._inner_backward(
+                                        self.output.data,
+                                        self.net.f_params,
+                                        list(self.net._buffers.values())[:4],
+                                        self.net.g_params,
+                                        list(self.net._buffers.values())[4:],
+                                        self.training)
+        # g = visualize.make_dot(self.output)
+        # g.view()
 
-# f_params = OrderedDict()
-# g_params = OrderedDict()
+    def test_grad(self):
+        auto_grad = torch.autograd.grad(self.output, self.input,
+                                        Variable(torch.ones(3, 4, 3, 3),
+                                                 requires_grad=True))[0]
 
-# in_channels = 3
-# out_channels = 3
-# f_params['w1'] = nn.Parameter(torch.Tensor(out_channels,
-#                                in_channels, 3, 3))
-# f_params['b1'] = nn.Parameter(torch.Tensor(out_channels))
-# f_params['bw1'] = nn.Parameter(torch.Tensor(out_channels))
-# f_params['bb1'] = nn.Parameter(torch.Tensor(out_channels))
-# f_params['w2'] = nn.Parameter(torch.Tensor(out_channels,
-#                                out_channels, 3, 3))
-# f_params['b2'] = nn.Parameter(torch.Tensor(out_channels))
-# f_params['bw2'] = nn.Parameter(torch.Tensor(out_channels))
-# f_params['bb2'] = nn.Parameter(torch.Tensor(out_channels))
+        manual_grad = revnet.RevBlockFunction._inner_grad(
+                                    self.input.data,
+                                    Variable(torch.ones(3, 4, 3, 3)),
+                                    self.in_channels,
+                                    self.out_channels,
+                                    self.training,
+                                    1,
+                                    self.net.f_params,
+                                    list(self.net._buffers.values())[:4],
+                                    self.net.g_params,
+                                    list(self.net._buffers.values())[4:])[0]
 
-# g_params['w1'] = nn.Parameter(torch.Tensor(out_channels,
-#                                out_channels, 3, 3))
-# g_params['b1'] = nn.Parameter(torch.Tensor(out_channels))
-# g_params['bw1'] = nn.Parameter(torch.Tensor(out_channels))
-# g_params['bb1'] = nn.Parameter(torch.Tensor(out_channels))
-# g_params['w2'] = nn.Parameter(torch.Tensor(out_channels,
-#                                out_channels, 3, 3))
-# g_params['b2'] = nn.Parameter(torch.Tensor(out_channels))
-# g_params['bw2'] = nn.Parameter(torch.Tensor(out_channels))
-# g_params['bb2'] = nn.Parameter(torch.Tensor(out_channels))
+        self.assertEqual(auto_grad, manual_grad)
 
-# f_rm1 = torch.zeros(out_channels)
-# f_rv1 = torch.ones(out_channels)
+    def test_recreation(self):
+        self.assertEqual(self.input.data, self.rec_input)
 
-# f_rm2 = torch.zeros(out_channels)
-# f_rv2 = torch.ones(out_channels)
 
-# g_rm1 = torch.zeros(out_channels)
-# g_rv1 = torch.ones(out_channels)
-
-# g_rm2 = torch.zeros(out_channels)
-# g_rv2 = torch.ones(out_channels)
-
-# optimizer = optim.SGD(list(f_params.values()), lr=0.1)
-
-# res = RevBlockFunction.forward(test, *f_params.values(), f_rm1, f_rv1, f_rm2, f_rv2,
-#         training=False)
-
-# loss = crit(res, target)
-
-# print(f_params['w2'].grad)
-
-# loss.backward()
-
-# print(f_params['w2'].grad)
-
-# optimizer.step()
+if __name__ == '__main__':
+    unittest.main()

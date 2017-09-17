@@ -4,19 +4,16 @@ import torch.nn.functional as F
 
 from torch.autograd import Function, Variable
 
-from collections import OrderedDict
-
-# from .resnet import Block, Bottleneck, _possible_downsample
-
-import visualize
-
 import gc
+
 
 def free():
     del activations[:]
     gc.collect()
 
+
 CUDA = torch.cuda.is_available()
+
 
 def possible_downsample(x, in_channels, out_channels, stride=1):
     if stride > 1:
@@ -41,10 +38,10 @@ def possible_downsample(x, in_channels, out_channels, stride=1):
     return out
 
 
-def residual(x, w1, b1, bw1, bb1, w2, b2, bw2, bb2, rm1, rv1, rm2, rv2, 
-        training, stride=1):
+def residual(x, w1, b1, bw1, bb1, w2, b2, bw2, bb2, rm1, rv1, rm2, rv2,
+             training, stride=1):
     """ Basic residual block in functional form
-    
+
     Args:
     """
     out = F.conv2d(x, w1, b1, stride, padding=1)
@@ -64,25 +61,12 @@ activations = []
 
 class RevBlockFunction(Function):
     @staticmethod
-    def forward(ctx, x, in_channels, out_channels,
-                training, stride, *args):
-
-        f_params = [Variable(p, requires_grad=True) for p in args[:8]]
-        f_buffs = args[8:12]
-        g_params = [Variable(p, requires_grad=True) for p in args[12:20]]
-        g_buffs = args[20:]
-
-        # print(f_params[0] is args[0])
-
-        # if stride > 1 information is lost and we need to save the input
-        if stride > 1:
-            activations.append(x)
-            ctx.load_input = True
-        else:
-            ctx.load_input = False
-
-        x1, x2 = x.chunk(2, dim=1)
-        x1, x2 = Variable(x1), Variable(x2)
+    def _inner(x, in_channels, out_channels, training, stride,
+               f_params, f_buffs, g_params, g_buffs, manual_grads=True):
+        x1, x2 = torch.chunk(x, 2, dim=1)
+        if manual_grads:
+            x1 = Variable(x1, volatile=True)
+            x2 = Variable(x2, volatile=True)
 
         if CUDA:
             x1.cuda()
@@ -99,12 +83,7 @@ class RevBlockFunction(Function):
 
         y2 = g_y1 + x2_
 
-        y = torch.cat([y1.data, y2.data], dim=1)
-
-        ctx.save_for_backward(*args[:8], *args[12:20])
-        ctx.f_buffs = args[8:12]
-        ctx.g_buffs = args[20:]
-        ctx.stride = stride
+        y = torch.cat([y1, y2], dim=1)
 
         del y1, y2
         del x1, x2
@@ -112,8 +91,97 @@ class RevBlockFunction(Function):
         return y
 
     @staticmethod
+    def _inner_backward(output, f_params, f_buffs, g_params, g_buffs,
+                        training):
+
+        y1, y2 = torch.chunk(output, 2, dim=1)
+        y1, y2 = Variable(y1, volatile=True), Variable(y2, volatile=True)
+        x2 = y2 - residual(y1, *g_params, *g_buffs, training=training)
+        x1 = y1 - residual(x2, *f_params, *f_buffs, training=training)
+        del y1, y2
+        x1, x2 = x1.data, x2.data
+
+        x = torch.cat((x1, x2), 1)
+        return x
+
+    @staticmethod
+    def _inner_grad(x, dy, in_channels, out_channels, training,
+                    stride, f_params, f_buffs, g_params, g_buffs):
+        dy1, dy2 = Variable.chunk(dy, 2, dim=1)
+
+        x1, x2 = torch.chunk(x, 2, dim=1)
+
+        x1 = Variable(x1, requires_grad=True)
+        x2 = Variable(x2, requires_grad=True)
+
+        if CUDA:
+            x1.cuda()
+            x2.cuda()
+
+        x1_ = possible_downsample(x1, in_channels, out_channels, stride)
+        x2_ = possible_downsample(x2, in_channels, out_channels, stride)
+
+        f_x2 = residual(x2, *f_params, *f_buffs, training=training,
+                        stride=stride)
+
+        y1_ = f_x2 + x1_
+
+        g_y1 = residual(y1_, *g_params, *g_buffs, training=training)
+        y2_ = g_y1 + x2_
+
+        # visualize.make_dot(y2_).view()
+
+        dd1 = torch.autograd.grad(y2_, (y1_,) + tuple(g_params), dy2,
+                                  retain_graph=True)
+        dy2_y1 = dd1[0]
+        dgw = dd1[1:]
+        dy1_plus = dy2_y1 + dy1
+        dd2 = torch.autograd.grad(y1_, (x1, x2) + tuple(f_params), dy1_plus,
+                                  retain_graph=True)
+        dx2 = dd2[1]
+        dx2 += torch.autograd.grad(x2_, x2, dy2, retain_graph=True)[0]
+        dx1 = dd2[0]
+        dfw = dd2[2:]
+
+        activations.append(x)
+
+        y1_.detach_()
+        y2_.detach_()
+        del y1_, y2_
+        dx = torch.cat((dx1, dx2), 1)
+
+        return dx, dfw, dgw
+
+    @staticmethod
+    def forward(ctx, x, in_channels, out_channels,
+                training, stride, *args):
+
+        f_params = [Variable(p, volatile=True) for p in args[:8]]
+        f_buffs = args[8:12]
+        g_params = [Variable(p, volatile=True) for p in args[12:20]]
+        g_buffs = args[20:]
+
+        # if stride > 1 information is lost and we need to save the input
+        if stride > 1:
+            activations.append(x)
+            ctx.load_input = True
+        else:
+            ctx.load_input = False
+
+        ctx.save_for_backward(*args[:8], *args[12:20])
+        ctx.f_buffs = args[8:12]
+        ctx.g_buffs = args[20:]
+        ctx.stride = stride
+        ctx.training = training
+
+        y = RevBlockFunction._inner(x, in_channels, out_channels, training,
+                                    stride, f_params, f_buffs, g_params,
+                                    g_buffs)
+
+        return y.data
+
+    @staticmethod
     def backward(ctx, grad_out):
-        dy1, dy2 = Variable.chunk(grad_out, 2, dim=1)
 
         f_params = ctx.saved_variables[:8]
         f_buffs = ctx.f_buffs
@@ -125,62 +193,24 @@ class RevBlockFunction(Function):
 
         if ctx.load_input:
             activations.pop()
-            input = activations.pop()
-            x1, x2 = torch.chunk(input, 2, dim=1)
+            x = activations.pop()
         else:
             output = activations.pop()
-            y1, y2 = torch.chunk(output, 2, dim=1)
-            y1, y2 = Variable(y1), Variable(y2)
-            x2 = y2 - residual(y1, *g_params, *g_buffs, training=True)
-            x1 = y1 - residual(x2, *f_params, *f_buffs, training=True)
-            del y1, y2
-            x1, x2 = x1.data, x2.data
-        
-        x1, x2 = Variable(x1, requires_grad=True), Variable(x2, requires_grad=True)
+            x = RevBlockFunction._inner_backward(output, f_params,
+                                                 f_buffs, g_params,
+                                                 g_buffs, ctx.training)
 
-        if CUDA:
-            x1.cuda()
-            x2.cuda()
+        dx, dfw, dgw = RevBlockFunction._inner_grad(x, grad_out,
+                                                    in_channels, out_channels,
+                                                    ctx.training, ctx.stride,
+                                                    f_params, f_buffs,
+                                                    g_params, g_buffs)
 
-        x1_ = possible_downsample(x1, in_channels, out_channels, ctx.stride)
-        x2_ = possible_downsample(x2, in_channels, out_channels, ctx.stride)
-
-        f_x2 = residual(x2, *f_params, *f_buffs, training=True,
-                stride=ctx.stride)
-
-        y1_ = f_x2 + x1_
-
-        g_y1 = residual(y1_, *g_params, *g_buffs, training=True)
-        y2_ = g_y1 + x2_
-
-        # visualize.make_dot(y2_).view()
-
-        dd1 = torch.autograd.grad(y2_, (y1_,) + g_params, dy2, retain_graph=True)
-        dy2_y1 = dd1[0]
-        dgw = dd1[1:]
-        dy1_plus = dy2_y1 + dy1
-        dd2 = torch.autograd.grad(y1_, (x1, x2) + f_params, dy1_plus, retain_graph=True)
-        dx2 = dd2[1]
-        dx2 += torch.autograd.grad(x2_, x2, dy2, retain_graph=True)[0]
-        dx1 = dd2[0]
-        dfw = dd2[2:]
-
-        x = torch.cat((x1, x2), 1)
-        activations.append(x.data)
-
-        y1_.detach_()
-        y2_.detach_()
-        del y1_, y2_
-        dx = torch.cat((dx1, dx2), 1)
-
-        # print(dx)
-
-        return ((dx, None, None, None, None) + tuple(dfw) + tuple([None]*4) + tuple(dgw) +
-                tuple([None]*4))
+        return ((dx, None, None, None, None) + tuple(dfw) + tuple([None]*4) +
+                tuple(dgw) + tuple([None]*4))
 
 
 class RevBlock(nn.Module):
-    function = RevBlockFunction
     def __init__(self, in_channels, out_channels, stride=1):
         super(self.__class__, self).__init__()
 
@@ -192,36 +222,34 @@ class RevBlock(nn.Module):
         self.g_params = []
 
         self.f_params.append(nn.Parameter(torch.Tensor(self.out_channels,
-                                       self.in_channels, 3, 3)))
+                                          self.in_channels, 3, 3)))
         self.f_params.append(nn.Parameter(torch.Tensor(self.out_channels)))
         self.f_params.append(nn.Parameter(torch.Tensor(self.out_channels)))
         self.f_params.append(nn.Parameter(torch.Tensor(self.out_channels)))
         self.f_params.append(nn.Parameter(torch.Tensor(self.out_channels,
-                                       self.out_channels, 3, 3)))
+                                          self.out_channels, 3, 3)))
         self.f_params.append(nn.Parameter(torch.Tensor(self.out_channels)))
         self.f_params.append(nn.Parameter(torch.Tensor(self.out_channels)))
         self.f_params.append(nn.Parameter(torch.Tensor(self.out_channels)))
 
         self.g_params.append(nn.Parameter(torch.Tensor(self.out_channels,
-                                       self.out_channels, 3, 3)))
+                                          self.out_channels, 3, 3)))
         self.g_params.append(nn.Parameter(torch.Tensor(self.out_channels)))
         self.g_params.append(nn.Parameter(torch.Tensor(self.out_channels)))
         self.g_params.append(nn.Parameter(torch.Tensor(self.out_channels)))
         self.g_params.append(nn.Parameter(torch.Tensor(self.out_channels,
-                                       self.out_channels, 3, 3)))
+                                          self.out_channels, 3, 3)))
         self.g_params.append(nn.Parameter(torch.Tensor(self.out_channels)))
         self.g_params.append(nn.Parameter(torch.Tensor(self.out_channels)))
         self.g_params.append(nn.Parameter(torch.Tensor(self.out_channels)))
 
-        param_names = ['w1', 'b1', 'bw1', 'bb1', 'w2', 'b2', 'bw2', 'bb2'] 
+        param_names = ['w1', 'b1', 'bw1', 'bb1', 'w2', 'b2', 'bw2', 'bb2']
 
-        for i,p in enumerate(self.f_params):
+        for i, p in enumerate(self.f_params):
             self.register_parameter('f_'+param_names[i], p)
 
-        for i,p in enumerate(self.g_params):
+        for i, p in enumerate(self.g_params):
             self.register_parameter('g_'+param_names[i], p)
-
-        # print(self._parameters['f_w1'] is self.f_params[0])
 
         self.register_buffer('f_rm1', torch.zeros(self.out_channels))
         self.register_buffer('f_rv1', torch.ones(self.out_channels))
@@ -269,14 +297,13 @@ class RevBlock(nn.Module):
         self.g_rm2.zero_()
         self.g_rv2.fill_(1)
 
-
-    def forward(self, x, save_activation=False):
-        return __class__.function.apply(x, self.in_channels, self.out_channels,
-                              self.training, self.stride,
-                              *self.f_params,
-                              *list(self._buffers.values())[:4],
-                              *self.g_params,
-                              *list(self._buffers.values())[4:])
+    def forward(self, x):
+        return RevBlockFunction.apply(x, self.in_channels, self.out_channels,
+                                      self.training, self.stride,
+                                      *self.f_params,
+                                      *list(self._buffers.values())[:4],
+                                      *self.g_params,
+                                      *list(self._buffers.values())[4:])
 
 
 class RevBottleneck(nn.Module):
@@ -321,15 +348,15 @@ class RevNet(nn.Module):
 
         # Input layer
         self.layers.append(nn.Conv2d(3, filters[0], 3, padding=1))
-        self.layers.append(nn.BatchNorm2d(filters[0]))  # remove parameters?
+        self.layers.append(nn.BatchNorm2d(filters[0]))
 
         for i, group_i in enumerate(units):
             self.layers.append(self.Reversible(filters[i], filters[i + 1],
-                                         stride=strides[i]))
+                                               stride=strides[i]))
 
             for unit in range(1, group_i):
                 self.layers.append(self.Reversible(filters[i + 1],
-                                             filters[i + 1]))
+                                                   filters[i + 1]))
 
         self.fc = nn.Linear(filters[-1], classes)
 
