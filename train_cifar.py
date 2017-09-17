@@ -32,6 +32,10 @@ parser.add_argument("--epochs", default=200, type=int,
                     help="number of epochs")
 parser.add_argument("--lr", default=0.1, type=float,
                     help="initial learning rate")
+parser.add_argument("--clip", default=0, type=float,
+                    help="maximal gradient norm")
+parser.add_argument("--weight-decay", default=1e-4, type=float,
+                    help="weight decay factor")
 
 
 # Check if CUDA is avaliable
@@ -55,8 +59,8 @@ def main():
 
     criterion = nn.CrossEntropyLoss()
 
-    optimizer = optim.SGD(model.parameters(), lr=args.lr,
-                          momentum=0.9, weight_decay=0.0001)
+    optimizer = optim.SGD(model.parameters(), lr=args.lr*10,
+                          momentum=0.9, weight_decay=args.weight_decay)
 
     scheduler = MultiStepLR(optimizer, milestones=[50, 100, 150],
                             gamma=0.1)
@@ -101,9 +105,10 @@ def main():
         return
 
     print("\nTraining model...")
-    for epoch in range(args.epochs):  # loop over the dataset multiple times
+    for epoch in range(args.epochs):
         scheduler.step()
-        train(epoch, model, criterion, optimizer, trainloader)
+        train(epoch, model, criterion, optimizer, trainloader,
+              args.clip)
         acc = validate(model, valloader)
 
         if acc > best_acc:
@@ -114,30 +119,32 @@ def main():
         print('Accuracy: {}%'.format(acc))
 
 
-def train(epoch, model, criterion, optimizer, trainloader):
+def train(epoch, model, criterion, optimizer, trainloader, clip):
     model.train()
     train_loss = 0
     correct = 0
     total = 0
     t = tqdm(trainloader, ascii=True, desc='{:03d}'.format(epoch))
     for i, data in enumerate(t):
-        # get the inputs
         inputs, labels = data
 
         if CUDA:
             inputs, labels = inputs.cuda(), labels.cuda()
 
-        # wrap them in Variable
         inputs, labels = Variable(inputs), Variable(labels)
 
-        # zero the parameter gradients
         optimizer.zero_grad()
 
-        # forward + backward + optimize
         outputs = model(inputs)
         loss = criterion(outputs, labels)
         loss.backward()
-        revnet.free()
+
+        # Free the memory used to store activations
+        if type(model) is revnet.RevNet:
+            revnet.free()
+
+        if clip > 0:
+            torch.nn.utils.clip_grad_norm(model.parameters(), clip)
         optimizer.step()
 
         train_loss += loss.data[0]
@@ -160,7 +167,11 @@ def validate(model, valloader):
         if CUDA:
             images, labels = images.cuda(), labels.cuda()
         outputs = model(Variable(images))
-        revnet.free()
+
+        # Free the memory used to store activations
+        if type(model) is revnet.RevNet:
+            revnet.free()
+
         _, predicted = torch.max(outputs.data, 1)
         total += labels.size(0)
         correct += (predicted == labels).sum()
