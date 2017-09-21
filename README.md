@@ -25,3 +25,10 @@ module can be downloaded
 |----------|----------|--------------|--------|
 | resnet32 | 89.82%   | 1299 MB      | 0.47 M |
 | revnet38 | 87.96%   | 660 MB       | 0.47 M |
+
+
+## TODO
+
+- [ ] Data Augmentation
+- [ ] Look into memory usage
+- [ ] Shake-Shake regularization
