@@ -6,6 +6,8 @@ import argparse
 
 from tqdm import tqdm
 
+# import matplotlib.pyplot as plt
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -36,6 +38,8 @@ parser.add_argument("--clip", default=0, type=float,
                     help="maximal gradient norm")
 parser.add_argument("--weight-decay", default=1e-4, type=float,
                     help="weight decay factor")
+parser.add_argument("--stats", action="store_true",
+                    help="record and plot some stats")
 
 
 # Check if CUDA is avaliable
@@ -106,19 +110,43 @@ def main():
         print('Accuracy: {}%'.format(acc))
         return
 
+    if args.stats:
+        losses = []
+        taccs = []
+        vaccs = []
+
     print("\nTraining model...")
     for epoch in range(args.epochs):
         scheduler.step()
-        train(epoch, model, criterion, optimizer, trainloader,
-              args.clip)
-        acc = validate(model, valloader)
+        loss, train_acc = train(epoch, model, criterion, optimizer,
+                                trainloader, args.clip)
+        val_acc = validate(model, valloader)
 
-        if acc > best_acc:
-            best_acc = acc
+        if val_acc > best_acc:
+            best_acc = val_acc
             if not os.path.isdir('checkpoints'):
                 os.mkdir('checkpoints')
             save_checkpoint(model)
-        print('Accuracy: {}%'.format(acc))
+        print('Accuracy: {}%'.format(val_acc))
+
+        if args.stats:
+            losses.append(loss)
+            taccs.append(train_acc)
+            vaccs.append(val_acc)
+
+    if args.stats:
+        path = "./stats/cifar_{0}_{1:%Y-%m-%d}_{1:%H-%M-%S}_{2}.dat"
+        with open(path.format(model.name, datetime.now(), 'loss'), 'w') as f:
+            for i in losses:
+                f.write('{}\n'.format(i))
+
+        with open(path.format(model.name, datetime.now(), 'taccs'), 'w') as f:
+            for i in taccs:
+                f.write('{}\n'.format(i))
+
+        with open(path.format(model.name, datetime.now(), 'vaccs'), 'w') as f:
+            for i in vaccs:
+                f.write('{}\n'.format(i))
 
 
 def train(epoch, model, criterion, optimizer, trainloader, clip):
@@ -153,9 +181,12 @@ def train(epoch, model, criterion, optimizer, trainloader, clip):
         _, predicted = torch.max(outputs.data, 1)
         total += labels.size(0)
         correct += predicted.eq(labels.data).cpu().sum()
+        acc = 100 * correct / total
 
         t.set_postfix(loss=train_loss/(i+1),
-                      acc='{:2.1f}%'.format(100*correct/total))
+                      acc='{:2.1f}%'.format(acc))
+
+    return train_loss, acc
 
 
 def validate(model, valloader):
