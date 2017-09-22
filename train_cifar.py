@@ -1,6 +1,5 @@
 from datetime import datetime
 
-import glob
 import os
 import argparse
 
@@ -15,7 +14,7 @@ import torchvision
 import torchvision.transforms as transforms
 
 from torch.autograd import Variable
-from torch.optim.lr_scheduler import MultiStepLR
+from torch.optim.lr_scheduler import StepLR
 
 import models
 import models.revnet as revnet
@@ -55,6 +54,9 @@ def main():
 
     model = getattr(models, args.model)()
 
+    exp_id = "cifar_{0}_{1:%Y-%m-%d}_{1:%H-%M-%S}".format(model.name,
+                                                          datetime.now())
+
     if CUDA:
         model.cuda()
 
@@ -66,8 +68,7 @@ def main():
     optimizer = optim.SGD(model.parameters(), lr=args.lr*10,
                           momentum=0.9, weight_decay=args.weight_decay)
 
-    scheduler = MultiStepLR(optimizer, milestones=[50, 100, 150],
-                            gamma=0.1)
+    scheduler = StepLR(optimizer, step_size=50, gamma=0.1)
 
     print("Prepairing data...")
 
@@ -124,9 +125,7 @@ def main():
 
         if val_acc > best_acc:
             best_acc = val_acc
-            if not os.path.isdir('checkpoints'):
-                os.mkdir('checkpoints')
-            save_checkpoint(model)
+            save_checkpoint(model, exp_id)
         print('Accuracy: {}%'.format(val_acc))
 
         if args.stats:
@@ -154,7 +153,7 @@ def train(epoch, model, criterion, optimizer, trainloader, clip):
     train_loss = 0
     correct = 0
     total = 0
-    t = tqdm(trainloader, ascii=True, desc='{:03d}'.format(epoch))
+    t = tqdm(trainloader, ascii=True, desc='{}'.format(epoch).rjust(3))
     for i, data in enumerate(t):
         inputs, labels = data
 
@@ -183,8 +182,8 @@ def train(epoch, model, criterion, optimizer, trainloader, clip):
         correct += predicted.eq(labels.data).cpu().sum()
         acc = 100 * correct / total
 
-        t.set_postfix(loss=train_loss/(i+1),
-                      acc='{:2.1f}%'.format(acc))
+        t.set_postfix(loss=str(train_loss/(i+1)).ljust(3),
+                      acc='{:2.1f}%'.format(acc).ljust(6))
 
     return train_loss, acc
 
@@ -215,22 +214,15 @@ def validate(model, valloader):
 
 
 def load(model, path):
-    if path == "latest":
-        load_latest(model)
-    else:
-        model.load_state_dict(torch.load(path))
+    model.load_state_dict(torch.load(path))
 
 
-def load_latest(model):
-    checkpoints = glob.glob('./checkpoints/*{}*'.format(model.name))
-    latest = max(checkpoints, key=os.path.getctime)
-    load(model, latest)
-
-
-def save_checkpoint(model):
-    path = "./checkpoints/cifar_{0}_{1:%Y-%m-%d}_{1:%H-%M-%S}.dat"
-    torch.save(model.state_dict(),
-               path.format(model.name, datetime.now()))
+def save_checkpoint(model, exp_id):
+    path = os.path.join(
+        "experiments", exp_id, "checkpoints",
+        "cifar_{0}_{1:%Y-%m-%d}_{1:%H-%M-%S}.dat".format(model.name,
+                                                         datetime.now()))
+    torch.save(model.state_dict(), path)
 
 
 if __name__ == "__main__":
