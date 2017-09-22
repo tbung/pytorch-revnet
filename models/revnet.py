@@ -41,19 +41,21 @@ def possible_downsample(x, in_channels, out_channels, stride=1):
 
 
 def residual(x, w1, b1, bw1, bb1, w2, b2, bw2, bb2, rm1, rv1, rm2, rv2,
-             training, stride=1):
+             training, stride=1, no_activation=False):
     """ Basic residual block in functional form
 
     Args:
     """
-    out = F.conv2d(x, w1, b1, stride, padding=1)
-    out = F.batch_norm(out, rm1, rv1, bw1, bb1, training)
-    out = F.relu(out)
+    out = x
+    if not no_activation:
+        out = F.batch_norm(out, rm1, rv1, bw1, bb1, training)
+        out = F.relu(out)
+    out = F.conv2d(out, w1, b1, stride, padding=1)
 
-    out = F.conv2d(out, w2, b2, stride=1, padding=1)
     out = F.batch_norm(out, rm2, rv2, bw2, bb2, training)
-    out = out + possible_downsample(x, w1.size(1), w1.size(0), stride)
     out = F.relu(out)
+    out = F.conv2d(out, w2, b2, stride=1, padding=1)
+    out = out + possible_downsample(x, w1.size(1), w1.size(0), stride)
 
     return out
 
@@ -64,7 +66,8 @@ activations = []
 class RevBlockFunction(Function):
     @staticmethod
     def _inner(x, in_channels, out_channels, training, stride,
-               f_params, f_buffs, g_params, g_buffs, manual_grads=True):
+               f_params, f_buffs, g_params, g_buffs, manual_grads=True,
+               no_activation=False):
         x1, x2 = torch.chunk(x, 2, dim=1)
         if manual_grads:
             x1 = Variable(x1, volatile=True)
@@ -77,7 +80,8 @@ class RevBlockFunction(Function):
         x1_ = possible_downsample(x1, in_channels, out_channels, stride)
         x2_ = possible_downsample(x2, in_channels, out_channels, stride)
 
-        f_x2 = residual(x2, *f_params, *f_buffs, training, stride=stride)
+        f_x2 = residual(x2, *f_params, *f_buffs, training, stride=stride,
+                        no_activation=no_activation)
 
         y1 = f_x2 + x1_
 
@@ -108,7 +112,8 @@ class RevBlockFunction(Function):
 
     @staticmethod
     def _inner_grad(x, dy, in_channels, out_channels, training,
-                    stride, f_params, f_buffs, g_params, g_buffs):
+                    stride, f_params, f_buffs, g_params, g_buffs,
+                    no_activation=False):
         dy1, dy2 = Variable.chunk(dy, 2, dim=1)
 
         x1, x2 = torch.chunk(x, 2, dim=1)
@@ -124,7 +129,7 @@ class RevBlockFunction(Function):
         x2_ = possible_downsample(x2, in_channels, out_channels, stride)
 
         f_x2 = residual(x2, *f_params, *f_buffs, training=training,
-                        stride=stride)
+                        stride=stride, no_activation=no_activation)
 
         y1_ = f_x2 + x1_
 
@@ -156,7 +161,7 @@ class RevBlockFunction(Function):
 
     @staticmethod
     def forward(ctx, x, in_channels, out_channels,
-                training, stride, *args):
+                training, stride, *args, no_activation=False):
 
         f_params = [Variable(p, volatile=True) for p in args[:8]]
         f_buffs = args[8:12]
@@ -175,10 +180,11 @@ class RevBlockFunction(Function):
         ctx.g_buffs = args[20:]
         ctx.stride = stride
         ctx.training = training
+        ctx.no_activation = no_activation
 
         y = RevBlockFunction._inner(x, in_channels, out_channels, training,
                                     stride, f_params, f_buffs, g_params,
-                                    g_buffs)
+                                    g_buffs, no_activation=no_activation)
 
         return y.data
 
@@ -206,42 +212,59 @@ class RevBlockFunction(Function):
                                                     in_channels, out_channels,
                                                     ctx.training, ctx.stride,
                                                     f_params, f_buffs,
-                                                    g_params, g_buffs)
+                                                    g_params, g_buffs,
+                                                    no_activation=ctx.no_activation)
 
         return ((dx, None, None, None, None) + tuple(dfw) + tuple([None]*4) +
                 tuple(dgw) + tuple([None]*4))
 
 
 class RevBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, stride=1):
+    def __init__(self, in_channels, out_channels, stride=1,
+                 no_activation=False):
         super(self.__class__, self).__init__()
 
         self.in_channels = in_channels // 2
         self.out_channels = out_channels // 2
         self.stride = stride
+        self.no_activation = no_activation
 
         self.f_params = []
         self.g_params = []
 
+        # Conv 1
         self.f_params.append(nn.Parameter(torch.Tensor(self.out_channels,
                                           self.in_channels, 3, 3)))
         self.f_params.append(nn.Parameter(torch.Tensor(self.out_channels)))
-        self.f_params.append(nn.Parameter(torch.Tensor(self.out_channels)))
-        self.f_params.append(nn.Parameter(torch.Tensor(self.out_channels)))
+
+        # BN 1
+        self.f_params.append(nn.Parameter(torch.Tensor(self.in_channels)))
+        self.f_params.append(nn.Parameter(torch.Tensor(self.in_channels)))
+
+        # Conv 2
         self.f_params.append(nn.Parameter(torch.Tensor(self.out_channels,
                                           self.out_channels, 3, 3)))
         self.f_params.append(nn.Parameter(torch.Tensor(self.out_channels)))
+
+        # BN 2
         self.f_params.append(nn.Parameter(torch.Tensor(self.out_channels)))
         self.f_params.append(nn.Parameter(torch.Tensor(self.out_channels)))
 
+        # Conv 1
         self.g_params.append(nn.Parameter(torch.Tensor(self.out_channels,
                                           self.out_channels, 3, 3)))
         self.g_params.append(nn.Parameter(torch.Tensor(self.out_channels)))
+
+        # BN 1
         self.g_params.append(nn.Parameter(torch.Tensor(self.out_channels)))
         self.g_params.append(nn.Parameter(torch.Tensor(self.out_channels)))
+
+        # Conv 2
         self.g_params.append(nn.Parameter(torch.Tensor(self.out_channels,
                                           self.out_channels, 3, 3)))
         self.g_params.append(nn.Parameter(torch.Tensor(self.out_channels)))
+
+        # BN 2
         self.g_params.append(nn.Parameter(torch.Tensor(self.out_channels)))
         self.g_params.append(nn.Parameter(torch.Tensor(self.out_channels)))
 
@@ -305,7 +328,8 @@ class RevBlock(nn.Module):
                                       *self.f_params,
                                       *list(self._buffers.values())[:4],
                                       *self.g_params,
-                                      *list(self._buffers.values())[4:])
+                                      *list(self._buffers.values())[4:],
+                                      no_activation=self.no_activation)
 
 
 class RevBottleneck(nn.Module):
@@ -354,7 +378,8 @@ class RevNet(nn.Module):
 
         for i, group_i in enumerate(units):
             self.layers.append(self.Reversible(filters[i], filters[i + 1],
-                                               stride=strides[i]))
+                                               stride=strides[i],
+                                               no_activation=True))
 
             for unit in range(1, group_i):
                 self.layers.append(self.Reversible(filters[i + 1],
