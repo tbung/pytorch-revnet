@@ -41,7 +41,7 @@ class Block(nn.Module):
 
         out = self.conv1(out)
 
-        out = self.conv2(F.relu(self.bn1(x)))
+        out = self.conv2(F.relu(self.bn2(out)))
 
         out += possible_downsample(orig_x, self.in_channels,
                                    self.out_channels, self.stride)
