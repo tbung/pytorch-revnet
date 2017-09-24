@@ -1,6 +1,7 @@
 from datetime import datetime
 
 import os
+import sys
 import argparse
 
 from tqdm import tqdm
@@ -56,6 +57,13 @@ def main():
 
     exp_id = "cifar_{0}_{1:%Y-%m-%d}_{1:%H-%M-%S}".format(model.name,
                                                           datetime.now())
+
+    path = os.path.join("./experiments/", exp_id, "cmd.sh")
+    if not os.path.exists(os.path.dirname(path)):
+            os.makedirs(os.path.dirname(path))
+
+    with open(path, 'w') as f:
+        f.write(' '.join(sys.argv))
 
     if CUDA:
         model.cuda()
@@ -133,17 +141,21 @@ def main():
             taccs.append(train_acc)
             vaccs.append(val_acc)
 
+    save_checkpoint(model, exp_id)
+
     if args.stats:
-        path = "./stats/cifar_{0}_{1:%Y-%m-%d}_{1:%H-%M-%S}_{2}.dat"
-        with open(path.format(model.name, datetime.now(), 'loss'), 'w') as f:
+        path = os.path.join("./experiments/", exp_id, "stats/{}.dat")
+        if not os.path.exists(os.path.dirname(path)):
+            os.makedirs(os.path.dirname(path))
+        with open(path.format('loss'), 'w') as f:
             for i in losses:
                 f.write('{}\n'.format(i))
 
-        with open(path.format(model.name, datetime.now(), 'taccs'), 'w') as f:
+        with open(path.format('taccs'), 'w') as f:
             for i in taccs:
                 f.write('{}\n'.format(i))
 
-        with open(path.format(model.name, datetime.now(), 'vaccs'), 'w') as f:
+        with open(path.format('vaccs'), 'w') as f:
             for i in vaccs:
                 f.write('{}\n'.format(i))
 
@@ -182,7 +194,7 @@ def train(epoch, model, criterion, optimizer, trainloader, clip):
         correct += predicted.eq(labels.data).cpu().sum()
         acc = 100 * correct / total
 
-        t.set_postfix(loss=str(train_loss/(i+1)).ljust(3),
+        t.set_postfix(loss='{:.3f}'.format(train_loss/(i+1)).ljust(3),
                       acc='{:2.1f}%'.format(acc).ljust(6))
 
     return train_loss, acc
@@ -222,6 +234,8 @@ def save_checkpoint(model, exp_id):
         "experiments", exp_id, "checkpoints",
         "cifar_{0}_{1:%Y-%m-%d}_{1:%H-%M-%S}.dat".format(model.name,
                                                          datetime.now()))
+    if not os.path.exists(os.path.dirname(path)):
+        os.makedirs(os.path.dirname(path))
     torch.save(model.state_dict(), path)
 
 
