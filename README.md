@@ -29,6 +29,7 @@ module can be downloaded
 
 ## TODO
 
-- [ ] Data Augmentation
+- [x] Data Augmentation
 - [ ] Look into memory usage
 - [ ] Shake-Shake regularization
+- [ ] Parameter initialization poassibly wrong
