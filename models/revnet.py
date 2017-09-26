@@ -1,5 +1,4 @@
 import math
-from collections import OrderedDict
 
 import torch
 import torch.nn as nn
@@ -44,24 +43,22 @@ def possible_downsample(x, in_channels, out_channels, stride=1):
     return out
 
 
-def residual(x, params, buffers, training, stride=1, no_activation=False):
+def residual(x, w1, b1, bw1, bb1, w2, b2, bw2, bb2, rm1, rv1, rm2, rv2,
+             training, stride=1, no_activation=False):
     """ Basic residual block in functional form
 
     Args:
     """
     out = x
     if not no_activation:
-        out = F.batch_norm(out, buffers['rm1'], buffers['rv1'], params['bw1'],
-                           params['bb1'], training)
+        out = F.batch_norm(out, rm1, rv1, bw1, bb1, training)
         out = F.relu(out)
-    out = F.conv2d(out, params['w1'], params['b1'], stride, padding=1)
+    out = F.conv2d(out, w1, b1, stride, padding=1)
 
-    out = F.batch_norm(out, buffers['rm2'], buffers['rv2'], params['bw2'],
-                       params['bb2'], training)
+    out = F.batch_norm(out, rm2, rv2, bw2, bb2, training)
     out = F.relu(out)
-    out = F.conv2d(out, params['w2'], params['b2'], stride=1, padding=1)
-    out = out + possible_downsample(x, params['w1'].size(1),
-                                    params['w1'].size(0), stride)
+    out = F.conv2d(out, w2, b2, stride=1, padding=1)
+    out = out + possible_downsample(x, w1.size(1), w1.size(0), stride)
 
     return out
 
@@ -246,8 +243,8 @@ class RevBlock(nn.Module):
         self.stride = stride
         self.no_activation = no_activation
 
-        self.f_params = OrderedDict()
-        self.g_params = OrderedDict()
+        self.f_params = []
+        self.g_params = []
 
         # Conv 1
         self.f_params.append(nn.Parameter(torch.Tensor(self.out_channels,
@@ -293,8 +290,8 @@ class RevBlock(nn.Module):
         for i, p in enumerate(self.g_params):
             self.register_parameter('g_'+param_names[i], p)
 
-        self.register_buffer('f_rm1', torch.zeros(self.out_channels))
-        self.register_buffer('f_rv1', torch.ones(self.out_channels))
+        self.register_buffer('f_rm1', torch.zeros(self.in_channels))
+        self.register_buffer('f_rv1', torch.ones(self.in_channels))
 
         self.register_buffer('f_rm2', torch.zeros(self.out_channels))
         self.register_buffer('f_rv2', torch.ones(self.out_channels))
