@@ -26,29 +26,27 @@ class TestRevNet(TestCase):
                                         self.training,
                                         1,
                                         self.net.f_params,
-                                        list(self.net._buffers.values())[:4],
+                                        self.net._buffers,
                                         self.net.g_params,
-                                        list(self.net._buffers.values())[4:],
+                                        self.net._buffers,
                                         manual_grads=False,
                                         no_activation=self.no_activation)
         self.rec_input = revnet.RevBlockFunction._inner_backward(
                                         self.output.data,
                                         self.net.f_params,
-                                        list(self.net._buffers.values())[:4],
+                                        self.net._buffers,
                                         self.net.g_params,
-                                        list(self.net._buffers.values())[4:],
+                                        self.net._buffers,
                                         self.training, self.no_activation)
         # g = visualize.make_dot(self.output)
         # g.view()
 
     def test_grad(self):
         auto_grad = torch.autograd.grad(self.output, [self.input] +
-                                        self.net.f_params[:2]
-                                        + self.net.f_params[4:]
+                                        self.net.f_params 
                                         + self.net.g_params,
                                         Variable(torch.ones(3, 4, 3, 3),
                                                  requires_grad=True))
-        auto_grad = auto_grad[:3] + (Variable(torch.zeros_like(self.net.f_params[2].data)),) + (Variable(torch.zeros_like(self.net.f_params[3].data)),) + auto_grad[3:]
 
         manual_grad = revnet.RevBlockFunction._inner_grad(
                                     self.input.data,
@@ -58,9 +56,9 @@ class TestRevNet(TestCase):
                                     self.training,
                                     1,
                                     self.net.f_params,
-                                    list(self.net._buffers.values())[:4],
+                                    self.net._buffers,
                                     self.net.g_params,
-                                    list(self.net._buffers.values())[4:],
+                                    self.net._buffers,
                                     no_activation=self.no_activation)
 
         manual_grad = [manual_grad[0]] + [v for sub in manual_grad[1:]
