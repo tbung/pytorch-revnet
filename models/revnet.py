@@ -290,8 +290,9 @@ class RevBlock(nn.Module):
         self.f_params['b1'] = nn.Parameter(torch.Tensor(self.out_channels))
 
         # BN 1
-        self.f_params['bw1'] = nn.Parameter(torch.Tensor(self.in_channels))
-        self.f_params['bb1'] = nn.Parameter(torch.Tensor(self.in_channels))
+        if not no_activation:
+            self.f_params['bw1'] = nn.Parameter(torch.Tensor(self.in_channels))
+            self.f_params['bb1'] = nn.Parameter(torch.Tensor(self.in_channels))
 
         # Conv 2
         self.f_params['w2'] = nn.Parameter(torch.Tensor(self.out_channels,
@@ -327,8 +328,10 @@ class RevBlock(nn.Module):
             self.register_parameter('g_' + i, p)
 
         self.f_buffs = OrderedDict()
-        self.f_buffs['rm1'] = torch.zeros(self.out_channels)
-        self.f_buffs['rv1'] = torch.ones(self.out_channels)
+
+        if not no_activation:
+            self.f_buffs['rm1'] = torch.zeros(self.out_channels)
+            self.f_buffs['rv1'] = torch.ones(self.out_channels)
 
         self.f_buffs['rm2'] = torch.zeros(self.out_channels)
         self.f_buffs['rv2'] = torch.ones(self.out_channels)
