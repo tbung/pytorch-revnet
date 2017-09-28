@@ -18,7 +18,8 @@ class TestRevNet(TestCase):
         self.out_channels = 4
         self.training = True
         self.no_activation = True
-        self.net = revnet.RevBlock(self.in_channels, self.out_channels)
+        self.net = revnet.RevBlock(self.in_channels, self.out_channels,
+                                   no_activation=True)
         self.output = revnet.RevBlockFunction._inner(
                                         self.input,
                                         self.in_channels,
@@ -26,25 +27,25 @@ class TestRevNet(TestCase):
                                         self.training,
                                         1,
                                         self.net.f_params,
-                                        self.net._buffers,
+                                        self.net.f_buffs,
                                         self.net.g_params,
-                                        self.net._buffers,
+                                        self.net.g_buffs,
                                         manual_grads=False,
                                         no_activation=self.no_activation)
         self.rec_input = revnet.RevBlockFunction._inner_backward(
                                         self.output.data,
                                         self.net.f_params,
-                                        self.net._buffers,
+                                        self.net.f_buffs,
                                         self.net.g_params,
-                                        self.net._buffers,
+                                        self.net.g_buffs,
                                         self.training, self.no_activation)
         # g = visualize.make_dot(self.output)
         # g.view()
 
     def test_grad(self):
         auto_grad = torch.autograd.grad(self.output, [self.input] +
-                                        self.net.f_params 
-                                        + self.net.g_params,
+                                        list(self.net.f_params.values()) 
+                                        + list(self.net.g_params.values()),
                                         Variable(torch.ones(3, 4, 3, 3),
                                                  requires_grad=True))
 
@@ -56,9 +57,9 @@ class TestRevNet(TestCase):
                                     self.training,
                                     1,
                                     self.net.f_params,
-                                    self.net._buffers,
+                                    self.net.f_buffs,
                                     self.net.g_params,
-                                    self.net._buffers,
+                                    self.net.g_buffs,
                                     no_activation=self.no_activation)
 
         manual_grad = [manual_grad[0]] + [v for sub in manual_grad[1:]

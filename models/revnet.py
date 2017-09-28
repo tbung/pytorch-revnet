@@ -52,8 +52,9 @@ def residual(x, params, buffers, training, stride=1, no_activation=False):
     out = x
     if not no_activation:
         out = F.batch_norm(out, buffers['rm1'], buffers['rv1'], params['bw1'],
+                           params['bb1'], training)
         out = F.relu(out)
-    out = F.conv2d(out, w1, b1, stride, padding=1)
+    out = F.conv2d(out, params['w1'], params['b1'], stride, padding=1)
 
     out = F.batch_norm(out, buffers['rm2'], buffers['rv2'], params['bw2'],
                        params['bb2'], training)
@@ -143,24 +144,14 @@ class RevBlockFunction(Function):
         g_y1 = residual(y1_, g_params, g_buffs, training=training)
         y2_ = g_y1 + x2_
 
-        dd1 = torch.autograd.grad(y2_, (y1_,) + tuple(g_params), dy2,
+        dd1 = torch.autograd.grad(y2_, (y1_,) + tuple(g_params.values()), dy2,
                                   retain_graph=True)
         dy2_y1 = dd1[0]
         dgw = dd1[1:]
         dy1_plus = dy2_y1 + dy1
-
-        if not no_activation:
-            dd2 = torch.autograd.grad(y1_, (x1, x2) + tuple(f_params),
-                                      dy1_plus, retain_graph=True)
-            dfw = dd2[2:]
-        else:
-            dd2 = torch.autograd.grad(y1_, (x1, x2) + tuple(f_params[:2]) +
-                                      tuple(f_params[4:]),
-                                      dy1_plus, retain_graph=True)
-            dfw = dd2[2:4]
-            dfw = dfw + (Variable(torch.zeros_like(f_params[2].data)),)
-            dfw = dfw + (Variable(torch.zeros_like(f_params[3].data)),)
-            dfw += dd2[4:]
+        dd2 = torch.autograd.grad(y1_, (x1, x2) + tuple(f_params.values()), dy1_plus,
+                                  retain_graph=True)
+        dfw = dd2[2:]
 
         dx2 = dd2[1]
         dx2 += torch.autograd.grad(x2_, x2, dy2, retain_graph=True)[0]
@@ -179,6 +170,7 @@ class RevBlockFunction(Function):
     def forward(ctx, x, in_channels, out_channels,
                 training, stride, no_activation, *args):
 
+        args = list(args)
         f_params = OrderedDict()
         f_params['w1'] = Variable(args.pop(0), volatile=True)
         f_params['b1'] = Variable(args.pop(0), volatile=True)
@@ -233,22 +225,31 @@ class RevBlockFunction(Function):
 
     @staticmethod
     def backward(ctx, grad_out):
+        saved_variables = list(ctx.saved_variables)
         f_params = OrderedDict()
-        f_params['w1'] = ctx.saved_variables.pop(0)
-        f_params['b1'] = ctx.saved_variables.pop(0)
+        f_params['w1'] = saved_variables.pop(0)
+        f_params['b1'] = saved_variables.pop(0)
         if not ctx.no_activation:
-            f_params['bw1'] = ctx.saved_variables.pop(0)
-            f_params['bb1'] = ctx.saved_variables.pop(0)
-        f_params['w2'] = ctx.saved_variables.pop(0)
-        f_params['b2'] = ctx.saved_variables.pop(0)
-        f_params['bw2'] = ctx.saved_variables.pop(0)
-        f_params['bb2'] = ctx.saved_variables.pop(0)
+            f_params['bw1'] = saved_variables.pop(0)
+            f_params['bb1'] = saved_variables.pop(0)
+        f_params['w2'] = saved_variables.pop(0)
+        f_params['b2'] = saved_variables.pop(0)
+        f_params['bw2'] = saved_variables.pop(0)
+        f_params['bb2'] = saved_variables.pop(0)
         f_buffs = ctx.f_buffs
-        g_params = ctx.saved_variables[8:]
+        g_params = OrderedDict()
+        g_params['w1'] = saved_variables.pop(0)
+        g_params['b1'] = saved_variables.pop(0)
+        g_params['bw1'] = saved_variables.pop(0)
+        g_params['bb1'] = saved_variables.pop(0)
+        g_params['w2'] = saved_variables.pop(0)
+        g_params['b2'] = saved_variables.pop(0)
+        g_params['bw2'] = saved_variables.pop(0)
+        g_params['bb2'] = saved_variables.pop(0)
         g_buffs = ctx.g_buffs
 
-        in_channels = f_params[0].size(1)
-        out_channels = f_params[0].size(0)
+        in_channels = f_params['w1'].size(1)
+        out_channels = f_params['w1'].size(0)
 
         if ctx.load_input:
             activations.pop()
@@ -267,8 +268,9 @@ class RevBlockFunction(Function):
                                                     g_params, g_buffs,
                                                     no_activation=ctx.no_activation)
 
-        return ((dx, None, None, None, None, None) + tuple(dfw) + tuple([None]*4) +
-                tuple(dgw) + tuple([None]*4))
+        num_buffs = 2 if ctx.no_activation else 4
+        return ((dx, None, None, None, None, None) + tuple(dfw) +
+                tuple([None]*num_buffs) + tuple(dgw) + tuple([None]*4))
 
 
 class RevBlock(nn.Module):
@@ -327,20 +329,16 @@ class RevBlock(nn.Module):
         for i, p in self.g_params.items():
             self.register_parameter('g_' + i, p)
 
-        self.f_buffs = OrderedDict()
-
         if not no_activation:
-            self.f_buffs['rm1'] = torch.zeros(self.out_channels)
-            self.f_buffs['rv1'] = torch.ones(self.out_channels)
+            self.register_buffer('f_rm1', torch.zeros(self.in_channels))
+            self.register_buffer('f_rv1', torch.ones(self.in_channels))
+        self.register_buffer('f_rm2', torch.zeros(self.out_channels))
+        self.register_buffer('f_rv2', torch.ones(self.out_channels))
 
-        self.f_buffs['rm2'] = torch.zeros(self.out_channels)
-        self.f_buffs['rv2'] = torch.ones(self.out_channels)
-
-        self.f_buffs['g_rm1'] = torch.zeros(self.out_channels)
-        self.f_buffs['g_rv1'] = torch.ones(self.out_channels)
-
-        self.f_buffs['g_rm2'] = torch.zeros(self.out_channels)
-        self.f_buffs['g_rv2'] = torch.ones(self.out_channels)
+        self.register_buffer('g_rm1', torch.zeros(self.out_channels))
+        self.register_buffer('g_rv1', torch.ones(self.out_channels))
+        self.register_buffer('g_rm2', torch.zeros(self.out_channels))
+        self.register_buffer('g_rv2', torch.ones(self.out_channels))
 
         self.reset_parameters()
 
@@ -379,13 +377,29 @@ class RevBlock(nn.Module):
         self.g_rv2.fill_(1)
 
     def forward(self, x):
+        self.f_buffs = OrderedDict()
+        self.g_buffs = OrderedDict()
+
+        if not self.no_activation:
+            self.f_buffs['rm1'] = self.f_rm1
+            self.f_buffs['rv1'] = self.f_rv1
+
+        self.f_buffs['rm2'] = self.f_rm2
+        self.f_buffs['rv2'] = self.f_rv2
+
+        self.g_buffs['rm1'] = self.g_rm1
+        self.g_buffs['rv1'] = self.g_rv1
+
+        self.g_buffs['rm2'] = self.g_rm2
+        self.g_buffs['rv2'] = self.g_rv2
+
         return RevBlockFunction.apply(x, self.in_channels, self.out_channels,
                                       self.training, self.stride,
                                       self.no_activation,
-                                      *self.f_params,
-                                      *list(self._buffers.values())[:4],
-                                      *self.g_params,
-                                      *list(self._buffers.values())[4:])
+                                      *self.f_params.values(),
+                                      *self.f_buffs.values(),
+                                      *self.g_params.values(),
+                                      *self.g_buffs.values())
 
 
 class RevBottleneck(nn.Module):
