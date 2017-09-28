@@ -8,10 +8,6 @@ import torch.nn.functional as F
 from torch.autograd import Function, Variable
 
 
-def free():
-    pass
-
-
 CUDA = torch.cuda.is_available()
 
 
@@ -470,3 +466,6 @@ class RevNet(nn.Module):
         x = self.fc(x)
 
         return x
+
+    def free(self):
+        del self.activations[:]

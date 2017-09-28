@@ -182,7 +182,7 @@ def train(epoch, model, criterion, optimizer, trainloader, clip):
 
         # Free the memory used to store activations
         if type(model) is revnet.RevNet:
-            revnet.free()
+            model.free()
 
         if clip > 0:
             torch.nn.utils.clip_grad_norm(model.parameters(), clip)
@@ -214,7 +214,7 @@ def validate(model, valloader):
 
         # Free the memory used to store activations
         if type(model) is revnet.RevNet:
-            revnet.free()
+            model.free()
 
         _, predicted = torch.max(outputs.data, 1)
         total += labels.size(0)
