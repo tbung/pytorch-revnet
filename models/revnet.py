@@ -7,12 +7,9 @@ import torch.nn.functional as F
 
 from torch.autograd import Function, Variable
 
-import gc
-
 
 def free():
-    del activations[:]
-    gc.collect()
+    pass
 
 
 CUDA = torch.cuda.is_available()
@@ -66,9 +63,6 @@ def residual(x, params, buffers, training, stride=1, no_activation=False):
     return out
 
 
-activations = []
-
-
 class RevBlockFunction(Function):
     @staticmethod
     def _inner(x, in_channels, out_channels, training, stride,
@@ -120,7 +114,7 @@ class RevBlockFunction(Function):
 
     @staticmethod
     def _inner_grad(x, dy, in_channels, out_channels, training,
-                    stride, f_params, f_buffs, g_params, g_buffs,
+                    stride, activations, f_params, f_buffs, g_params, g_buffs,
                     no_activation=False):
         dy1, dy2 = Variable.chunk(dy, 2, dim=1)
 
@@ -168,7 +162,7 @@ class RevBlockFunction(Function):
 
     @staticmethod
     def forward(ctx, x, in_channels, out_channels,
-                training, stride, no_activation, *args):
+                training, stride, no_activation, activations, *args):
 
         args = list(args)
         f_params = OrderedDict()
@@ -216,6 +210,7 @@ class RevBlockFunction(Function):
         ctx.stride = stride
         ctx.training = training
         ctx.no_activation = no_activation
+        ctx.activations = activations
 
         y = RevBlockFunction._inner(x, in_channels, out_channels, training,
                                     stride, f_params, f_buffs, g_params,
@@ -252,10 +247,10 @@ class RevBlockFunction(Function):
         out_channels = f_params['w1'].size(0)
 
         if ctx.load_input:
-            activations.pop()
-            x = activations.pop()
+            ctx.activations.pop()
+            x = ctx.activations.pop()
         else:
-            output = activations.pop()
+            output = ctx.activations.pop()
             x = RevBlockFunction._inner_backward(output, f_params,
                                                  f_buffs, g_params,
                                                  g_buffs, ctx.training,
@@ -264,17 +259,18 @@ class RevBlockFunction(Function):
         dx, dfw, dgw = RevBlockFunction._inner_grad(x, grad_out,
                                                     in_channels, out_channels,
                                                     ctx.training, ctx.stride,
+                                                    ctx.activations,
                                                     f_params, f_buffs,
                                                     g_params, g_buffs,
                                                     no_activation=ctx.no_activation)
 
         num_buffs = 2 if ctx.no_activation else 4
-        return ((dx, None, None, None, None, None) + tuple(dfw) +
+        return ((dx, None, None, None, None, None, None) + tuple(dfw) +
                 tuple([None]*num_buffs) + tuple(dgw) + tuple([None]*4))
 
 
 class RevBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, stride=1,
+    def __init__(self, in_channels, out_channels, activations, stride=1,
                  no_activation=False):
         super(self.__class__, self).__init__()
 
@@ -282,6 +278,7 @@ class RevBlock(nn.Module):
         self.out_channels = out_channels // 2
         self.stride = stride
         self.no_activation = no_activation
+        self.activations = activations
 
         self.f_params = OrderedDict()
         self.g_params = OrderedDict()
@@ -396,6 +393,7 @@ class RevBlock(nn.Module):
         return RevBlockFunction.apply(x, self.in_channels, self.out_channels,
                                       self.training, self.stride,
                                       self.no_activation,
+                                      self.activations,
                                       *self.f_params.values(),
                                       *self.f_buffs.values(),
                                       *self.g_params.values(),
@@ -435,6 +433,8 @@ class RevNet(nn.Module):
         super(RevNet, self).__init__()
         self.name = self.__class__.__name__
 
+        self.activations = []
+
         if bottleneck:
             self.Reversible = RevBottleneck     # TODO: Implement RevBottleneck
         else:
@@ -449,11 +449,13 @@ class RevNet(nn.Module):
         for i, group_i in enumerate(units):
             self.layers.append(self.Reversible(filters[i], filters[i + 1],
                                                stride=strides[i],
-                                               no_activation=True))
+                                               no_activation=True,
+                                               activations=self.activations))
 
             for unit in range(1, group_i):
                 self.layers.append(self.Reversible(filters[i + 1],
-                                                   filters[i + 1]))
+                                                   filters[i + 1],
+                                                   activations=self.activations))
 
         self.fc = nn.Linear(filters[-1], classes)
 
@@ -461,7 +463,7 @@ class RevNet(nn.Module):
         for layer in self.layers:
             x = layer(x)
 
-        activations.append(x.data)
+        self.activations.append(x.data)
 
         x = F.avg_pool2d(x, x.size(2))
         x = x.view(x.size(0), -1)
