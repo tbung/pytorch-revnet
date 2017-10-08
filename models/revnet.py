@@ -11,25 +11,37 @@ CUDA = torch.cuda.is_available()
 
 def possible_downsample(x, in_channels, out_channels, stride=1):
     out = None
+
+    # Downsample image
     if stride > 1:
         out = F.avg_pool2d(x, stride, stride)
 
+    # Pad with empty channels
     if in_channels < out_channels:
+
         if out is None:
             out = x
-        pad = Variable(torch.zeros(out.size(0),
-                                   (out_channels - in_channels) // 2,
-                                   out.size(2), out.size(3)))
+
+        pad = Variable(torch.zeros(
+            out.size(0),
+            (out_channels - in_channels) // 2,
+            out.size(2), out.size(3)
+        ))
+
         if CUDA:
             pad = pad.cuda()
 
         temp = torch.cat([pad, out], dim=1)
         out = torch.cat([temp, pad], dim=1)
 
+    # If we did nothing, add zero tensor, so the output of this function
+    # depends on the input in the graph
     if out is None:
         injection = Variable(torch.zeros_like(x.data))
+
         if CUDA:
             injection.cuda()
+
         out = x + injection
 
     return out
@@ -37,9 +49,8 @@ def possible_downsample(x, in_channels, out_channels, stride=1):
 
 def residual(x, in_channels, out_channels, params, buffers, training, stride=1,
              no_activation=False):
-    """ Basic pre-activation residual block in functional form
-
-    Args:
+    """
+    Basic pre-activation residual block in functional form
     """
     out = x
 
@@ -106,7 +117,7 @@ class RevBlockFunction(Function):
         x2 = y2 - residual(y1, out_channels, out_channels, g_params, g_buffs,
                            training=training)
         x1 = y1 - residual(x2, in_channels, out_channels, f_params, f_buffs,
-                           training=training, no_activation=no_activation)
+                           training=training)
         del y1, y2
         x1, x2 = x1.data, x2.data
 
@@ -177,7 +188,7 @@ class RevBlockFunction(Function):
             g_params = [Variable(x) for x in args[6:14]]
             f_buffs = args[14:16]
             g_buffs = args[16:]
-            
+
         if CUDA:
             for var in f_params:
                 var.cuda()
@@ -185,7 +196,7 @@ class RevBlockFunction(Function):
                 var.cuda()
 
         # if stride > 1 information is lost and we need to save the input
-        if stride > 1:
+        if stride > 1 or no_activation:
             activations.append(x)
             ctx.load_input = True
         else:
@@ -202,9 +213,16 @@ class RevBlockFunction(Function):
         ctx.in_channels = in_channels
         ctx.out_channels = out_channels
 
-        y = RevBlockFunction._inner(x, in_channels, out_channels, training,
-                                    stride, f_params, f_buffs, g_params,
-                                    g_buffs, no_activation=no_activation)
+        y = RevBlockFunction._inner(
+            x,
+            in_channels,
+            out_channels,
+            training,
+            stride,
+            f_params, f_buffs,
+            g_params, g_buffs,
+            no_activation=no_activation
+        )
 
         return y.data
 
@@ -221,21 +239,29 @@ class RevBlockFunction(Function):
         in_channels = ctx.in_channels
         out_channels = ctx.out_channels
 
+        # Load or reconstruct input
         if ctx.load_input:
             ctx.activations.pop()
             x = ctx.activations.pop()
         else:
             output = ctx.activations.pop()
-            x = RevBlockFunction._inner_backward(output, in_channels,
-                                                 out_channels, f_params,
-                                                 ctx.f_buffs, g_params,
-                                                 ctx.g_buffs, ctx.training,
-                                                 ctx.no_activation)
+            x = RevBlockFunction._inner_backward(
+                output,
+                in_channels,
+                out_channels,
+                f_params, ctx.f_buffs,
+                g_params, ctx.g_buffs,
+                ctx.training,
+                ctx.no_activation
+            )
 
         dx, dfw, dgw = RevBlockFunction._inner_grad(
-            x, grad_out,
-            in_channels, out_channels,
-            ctx.training, ctx.stride,
+            x,
+            grad_out,
+            in_channels,
+            out_channels,
+            ctx.training,
+            ctx.stride,
             ctx.activations,
             f_params, ctx.f_buffs,
             g_params, ctx.g_buffs,
@@ -243,6 +269,7 @@ class RevBlockFunction(Function):
         )
 
         num_buffs = 2 if ctx.no_activation else 4
+
         return ((dx, None, None, None, None, None, None) + tuple(dfw) +
                 tuple(dgw) + tuple([None]*num_buffs) + tuple([None]*4))
 
@@ -267,10 +294,14 @@ class RevBlock(nn.Module):
                 'f_bb1',
                 nn.Parameter(torch.Tensor(self.in_channels))
             )
+
         self.register_parameter(
             'f_w1',
-            nn.Parameter(torch.Tensor(self.out_channels, self.in_channels, 
-                                      3, 3))
+            nn.Parameter(torch.Tensor(
+                self.out_channels,
+                self.in_channels, 
+                3, 3
+            ))
         )
         self.register_parameter(
             'f_b1',
@@ -286,8 +317,11 @@ class RevBlock(nn.Module):
         )
         self.register_parameter(
             'f_w2',
-            nn.Parameter(torch.Tensor(self.out_channels, self.out_channels,
-                                      3, 3))
+            nn.Parameter(torch.Tensor(
+                self.out_channels,
+                self.out_channels,
+                3, 3
+            ))
         )
         self.register_parameter(
             'f_b2',
@@ -304,8 +338,11 @@ class RevBlock(nn.Module):
         )
         self.register_parameter(
             'g_w1',
-            nn.Parameter(torch.Tensor(self.out_channels, self.out_channels,
-                                      3, 3))
+            nn.Parameter(torch.Tensor(
+                self.out_channels,
+                self.out_channels,
+                3, 3
+            ))
         )
         self.register_parameter(
             'g_b1',
@@ -321,8 +358,11 @@ class RevBlock(nn.Module):
         )
         self.register_parameter(
             'g_w2',
-            nn.Parameter(torch.Tensor(self.out_channels, self.out_channels,
-                                      3, 3))
+            nn.Parameter(torch.Tensor(
+                self.out_channels,
+                self.out_channels,
+                3, 3
+            ))
         )
         self.register_parameter(
             'g_b2',
@@ -346,13 +386,13 @@ class RevBlock(nn.Module):
         f_stdv = 1 / math.sqrt(self.in_channels * 3 * 3)
         g_stdv = 1 / math.sqrt(self.out_channels * 3 * 3)
 
+        if not self.no_activation:
+            self._parameters['f_bw1'].data.uniform_()
+            self._parameters['f_bb1'].data.zero_()
         self._parameters['f_w1'].data.uniform_(-f_stdv, f_stdv)
         self._parameters['f_b1'].data.uniform_(-f_stdv, f_stdv)
         self._parameters['f_w2'].data.uniform_(-g_stdv, g_stdv)
         self._parameters['f_b2'].data.uniform_(-g_stdv, g_stdv)
-        if not self.no_activation:
-            self._parameters['f_bw1'].data.uniform_()
-            self._parameters['f_bb1'].data.zero_()
         self._parameters['f_bw2'].data.uniform_()
         self._parameters['f_bb2'].data.zero_()
 
@@ -377,12 +417,17 @@ class RevBlock(nn.Module):
         self.g_rv2.fill_(1)
 
     def forward(self, x):
-        return RevBlockFunction.apply(x, self.in_channels, self.out_channels,
-                                      self.training, self.stride,
-                                      self.no_activation,
-                                      self.activations,
-                                      *self._parameters.values(),
-                                      *self._buffers.values())
+        return RevBlockFunction.apply(
+            x,
+            self.in_channels,
+            self.out_channels,
+            self.training,
+            self.stride,
+            self.no_activation,
+            self.activations,
+            *self._parameters.values(),
+            *self._buffers.values()
+        )
 
 
 class RevBottleneck(nn.Module):
@@ -432,15 +477,19 @@ class RevNet(nn.Module):
         self.layers.append(nn.BatchNorm2d(filters[0]))
 
         for i, group_i in enumerate(units):
-            self.layers.append(self.Reversible(filters[i], filters[i + 1],
-                                               stride=strides[i],
-                                               no_activation=True,
-                                               activations=self.activations))
+            self.layers.append(self.Reversible(
+                filters[i], filters[i + 1],
+                stride=strides[i],
+                no_activation=True,
+                activations=self.activations
+            ))
 
             for unit in range(1, group_i):
-                self.layers.append(self.Reversible(filters[i + 1],
-                                                   filters[i + 1],
-                                                   activations=self.activations))
+                self.layers.append(self.Reversible(
+                    filters[i + 1],
+                    filters[i + 1],
+                    activations=self.activations
+                ))
 
         self.fc = nn.Linear(filters[-1], classes)
 
@@ -448,6 +497,7 @@ class RevNet(nn.Module):
         for layer in self.layers:
             x = layer(x)
 
+        # Save last output for backward
         self.activations.append(x.data)
 
         x = F.avg_pool2d(x, x.size(2))
@@ -457,4 +507,7 @@ class RevNet(nn.Module):
         return x
 
     def free(self):
+        """
+        Function to clear saved activation residue and thereby free memory
+        """
         del self.activations[:]
