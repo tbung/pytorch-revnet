@@ -15,25 +15,14 @@ def resnet32():
     return model
 
 
-def resnet34():
+def resnet110():
     model = ResNet(
-            units=[3, 4, 6, 3],
-            filters=[64, 64, 128, 256, 512],
-            strides=[1, 2, 2, 2],
-            classes=10
-            )
-    model.name = "resnet34"
-    return model
-
-
-def resnet56():
-    model = ResNet(
-            units=[9, 9, 9],
+            units=[18, 18, 18],
             filters=[16, 16, 32, 64],
             strides=[1, 2, 2],
             classes=10
             )
-    model.name = "resnet56"
+    model.name = "resnet110"
     return model
 
 
@@ -45,4 +34,15 @@ def revnet38():
             classes=10
             )
     model.name = "revnet38"
+    return model
+
+
+def revnet110():
+    model = RevNet(
+            units=[9, 9, 9],
+            filters=[32, 32, 64, 112],
+            strides=[1, 2, 2],
+            classes=10
+            )
+    model.name = "revnet110"
     return model

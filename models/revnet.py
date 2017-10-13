@@ -66,8 +66,6 @@ def residual(x, in_channels, out_channels, params, buffers, training, stride=1,
     out = F.relu(out)
     out = F.conv2d(out, params[-2], params[-1], stride=1, padding=1)
 
-    out = out + possible_downsample(x, in_channels, out_channels, stride)
-
     return out
 
 
