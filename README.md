@@ -23,13 +23,5 @@ module can be downloaded
 
 | Model    | Accuracy | Memory Usage | Params |
 |----------|----------|--------------|--------|
-| resnet32 | 89.82%   | 1299 MB      | 0.47 M |
-| revnet38 | 87.96%   | 660 MB       | 0.47 M |
-
-
-## TODO
-
-- [x] Data Augmentation
-- [ ] Look into memory usage
-- [ ] Shake-Shake regularization
-- [ ] Parameter initialization poassibly wrong
+| resnet32 | 92.02%   | 1271 MB      | 0.47 M |
+| revnet38 | 91.98%   | 660 MB       | 0.47 M |
