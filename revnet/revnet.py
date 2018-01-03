@@ -47,33 +47,41 @@ def possible_downsample(x, in_channels, out_channels, stride=1):
     return out
 
 
-def residual(x, in_channels, out_channels, params, buffers, training, stride=1,
-             no_activation=False):
-    """
-    Basic pre-activation residual block in functional form
-    """
-    out = x
-
-    if not no_activation:
-        out = F.batch_norm(out, buffers[0], buffers[1], params[0],
-                           params[1], training)
-        out = F.relu(out)
-
-    out = F.conv2d(out, params[-6], params[-5], stride, padding=1)
-
-    out = F.batch_norm(out, buffers[-2], buffers[-1], params[-4],
-                       params[-3], training)
-    out = F.relu(out)
-    out = F.conv2d(out, params[-2], params[-1], stride=1, padding=1)
-
-    return out
-
-
 class RevBlockFunction(Function):
     @staticmethod
-    def _inner(x, in_channels, out_channels, training, stride,
-               f_params, f_buffs, g_params, g_buffs, manual_grads=True,
-               no_activation=False):
+    def residual(x, in_channels, out_channels, params, buffers, training,
+                 stride=1, no_activation=False):
+        """Compute a pre-activation residual function.
+
+        Args:
+            x (Variable): The input variable
+            in_channels (int): Number of channels of x
+            out_channels (int): Number of channels of the output
+
+        Returns:
+            out (Variable): The result of the computation
+
+        """
+        out = x
+
+        if not no_activation:
+            out = F.batch_norm(out, buffers[0], buffers[1], params[0],
+                               params[1], training)
+            out = F.relu(out)
+
+        out = F.conv2d(out, params[-6], params[-5], stride, padding=1)
+
+        out = F.batch_norm(out, buffers[-2], buffers[-1], params[-4],
+                           params[-3], training)
+        out = F.relu(out)
+        out = F.conv2d(out, params[-2], params[-1], stride=1, padding=1)
+
+        return out
+
+    @staticmethod
+    def _forward(x, in_channels, out_channels, training, stride,
+                 f_params, f_buffs, g_params, g_buffs, manual_grads=True,
+                 no_activation=False):
 
         x1, x2 = torch.chunk(x, 2, dim=1)
 
@@ -88,13 +96,26 @@ class RevBlockFunction(Function):
         x1_ = possible_downsample(x1, in_channels, out_channels, stride)
         x2_ = possible_downsample(x2, in_channels, out_channels, stride)
 
-        f_x2 = residual(x2, in_channels, out_channels, f_params, f_buffs,
-                        training, stride=stride, no_activation=no_activation)
+        f_x2 = RevBlockFunction.residual(
+            x2,
+            in_channels,
+            out_channels,
+            f_params,
+            f_buffs, training,
+            stride=stride,
+            no_activation=no_activation
+        )
 
         y1 = f_x2 + x1_
 
-        g_y1 = residual(y1, out_channels, out_channels, g_params, g_buffs,
-                        training)
+        g_y1 = RevBlockFunction.residual(
+            y1,
+            out_channels,
+            out_channels,
+            g_params,
+            g_buffs,
+            training
+        )
 
         y2 = g_y1 + x2_
 
@@ -106,16 +127,31 @@ class RevBlockFunction(Function):
         return y
 
     @staticmethod
-    def _inner_backward(output, in_channels, out_channels, f_params, f_buffs,
-                        g_params, g_buffs, training, no_activation):
+    def _backward(output, in_channels, out_channels, f_params, f_buffs,
+                  g_params, g_buffs, training, no_activation):
 
         y1, y2 = torch.chunk(output, 2, dim=1)
         y1 = Variable(y1, volatile=True).contiguous()
         y2 = Variable(y2, volatile=True).contiguous()
-        x2 = y2 - residual(y1, out_channels, out_channels, g_params, g_buffs,
-                           training=training)
-        x1 = y1 - residual(x2, in_channels, out_channels, f_params, f_buffs,
-                           training=training)
+
+        x2 = y2 - RevBlockFunction.residual(
+            y1,
+            out_channels,
+            out_channels,
+            g_params,
+            g_buffs,
+            training=training
+        )
+
+        x1 = y1 - RevBlockFunction.residual(
+            x2,
+            in_channels,
+            out_channels,
+            f_params,
+            f_buffs,
+            training=training
+        )
+
         del y1, y2
         x1, x2 = x1.data, x2.data
 
@@ -123,9 +159,9 @@ class RevBlockFunction(Function):
         return x
 
     @staticmethod
-    def _inner_grad(x, dy, in_channels, out_channels, training, stride,
-                    activations, f_params, f_buffs, g_params, g_buffs,
-                    no_activation=False):
+    def _grad(x, dy, in_channels, out_channels, training, stride,
+              activations, f_params, f_buffs, g_params, g_buffs,
+              no_activation=False):
         dy1, dy2 = Variable.chunk(dy, 2, dim=1)
 
         x1, x2 = torch.chunk(x, 2, dim=1)
@@ -140,14 +176,28 @@ class RevBlockFunction(Function):
         x1_ = possible_downsample(x1, in_channels, out_channels, stride)
         x2_ = possible_downsample(x2, in_channels, out_channels, stride)
 
-        f_x2 = residual(x2, in_channels, out_channels, f_params, f_buffs,
-                        training=training, stride=stride,
-                        no_activation=no_activation)
+        f_x2 = RevBlockFunction.residual(
+            x2,
+            in_channels,
+            out_channels,
+            f_params,
+            f_buffs,
+            training=training,
+            stride=stride,
+            no_activation=no_activation
+        )
 
         y1_ = f_x2 + x1_
 
-        g_y1 = residual(y1_, out_channels, out_channels, g_params, g_buffs,
-                        training=training)
+        g_y1 = RevBlockFunction.residual(
+            y1_,
+            out_channels,
+            out_channels,
+            g_params,
+            g_buffs,
+            training=training
+        )
+
         y2_ = g_y1 + x2_
 
         dd1 = torch.autograd.grad(y2_, (y1_,) + tuple(g_params), dy2,
@@ -211,7 +261,7 @@ class RevBlockFunction(Function):
         ctx.in_channels = in_channels
         ctx.out_channels = out_channels
 
-        y = RevBlockFunction._inner(
+        y = RevBlockFunction._forward(
             x,
             in_channels,
             out_channels,
@@ -243,7 +293,7 @@ class RevBlockFunction(Function):
             x = ctx.activations.pop()
         else:
             output = ctx.activations.pop()
-            x = RevBlockFunction._inner_backward(
+            x = RevBlockFunction._backward(
                 output,
                 in_channels,
                 out_channels,
@@ -253,7 +303,7 @@ class RevBlockFunction(Function):
                 ctx.no_activation
             )
 
-        dx, dfw, dgw = RevBlockFunction._inner_grad(
+        dx, dfw, dgw = RevBlockFunction._grad(
             x,
             grad_out,
             in_channels,
@@ -275,7 +325,7 @@ class RevBlockFunction(Function):
 class RevBlock(nn.Module):
     def __init__(self, in_channels, out_channels, activations, stride=1,
                  no_activation=False):
-        super(self.__class__, self).__init__()
+        super(RevBlock, self).__init__()
 
         self.in_channels = in_channels // 2
         self.out_channels = out_channels // 2
@@ -297,7 +347,7 @@ class RevBlock(nn.Module):
             'f_w1',
             nn.Parameter(torch.Tensor(
                 self.out_channels,
-                self.in_channels, 
+                self.in_channels,
                 3, 3
             ))
         )
@@ -441,22 +491,17 @@ class RevNet(nn.Module):
                  classes,
                  bottleneck=False):
         """
-        Parameters
-        ----------
+        Args:
+            units (list-like): Number of residual units in each group
 
-        units: list-like
-            Number of residual units in each group
+            filters (list-like): Number of filters in each unit including the
+                inputlayer, so it is one item longer than units
 
-        filters: list-like
-            Number of filters in each unit including the inputlayer, so it is
-            one item longer than units
+            strides (list-like): Strides to use for the first units in each
+                group, same length as units
 
-        strides: list-like
-            Strides to use for the first units in each group, same length as
-            units
-
-        bottleneck: boolean
-            Wether to use the bottleneck residual or the basic residual
+            bottleneck (boolean): Wether to use the bottleneck residual or the
+                basic residual
         """
         super(RevNet, self).__init__()
         self.name = self.__class__.__name__
@@ -505,7 +550,5 @@ class RevNet(nn.Module):
         return x
 
     def free(self):
-        """
-        Function to clear saved activation residue and thereby free memory
-        """
+        """Clear saved activation residue and thereby free memory."""
         del self.activations[:]

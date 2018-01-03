@@ -17,8 +17,8 @@ import torchvision.transforms as transforms
 from torch.autograd import Variable
 from torch.optim.lr_scheduler import StepLR
 
-import models
-import models.revnet as revnet
+import revnet as models
+import revnet.revnet as revnet
 
 
 parser = argparse.ArgumentParser()
