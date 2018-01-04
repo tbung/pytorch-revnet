@@ -80,14 +80,12 @@ class RevBlockFunction(Function):
 
     @staticmethod
     def _forward(x, in_channels, out_channels, training, stride,
-                 f_params, f_buffs, g_params, g_buffs, manual_grads=True,
-                 no_activation=False):
+                 f_params, f_buffs, g_params, g_buffs, no_activation=False):
 
         x1, x2 = torch.chunk(x, 2, dim=1)
 
-        if manual_grads:
-            x1 = Variable(x1, volatile=True).contiguous()
-            x2 = Variable(x2, volatile=True).contiguous()
+        x1 = Variable(x1, volatile=True).contiguous()
+        x2 = Variable(x2, volatile=True).contiguous()
 
         if CUDA:
             x1.cuda()

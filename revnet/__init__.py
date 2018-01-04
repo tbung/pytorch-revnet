@@ -1,7 +1,5 @@
 from .resnet import ResNet
-from .revnet import RevNet
-
-__all__ = ["ResNet", "resnet32", "resnet34", "revnet38"]
+from .revnet import RevNet, RevBlock, RevBlockFunction
 
 
 def resnet32():
