@@ -159,7 +159,7 @@ class RevBlockFunction(Function):
     @staticmethod
     def _grad(x, dy, in_channels, out_channels, training, stride,
               activations, f_params, f_buffs, g_params, g_buffs,
-              no_activation=False):
+              no_activation=False, storage_hooks=[]):
         dy1, dy2 = Variable.chunk(dy, 2, dim=1)
 
         x1, x2 = torch.chunk(x, 2, dim=1)
@@ -211,6 +211,9 @@ class RevBlockFunction(Function):
         dx2 += torch.autograd.grad(x2_, x2, dy2, retain_graph=True)[0]
         dx1 = dd2[0]
 
+        for hook in storage_hooks:
+            x = hook(x)
+
         activations.append(x)
 
         y1_.detach_()
@@ -221,8 +224,27 @@ class RevBlockFunction(Function):
         return dx, dfw, dgw
 
     @staticmethod
-    def forward(ctx, x, in_channels, out_channels,
-                training, stride, no_activation, activations, *args):
+    def forward(ctx, x, in_channels, out_channels, training, stride,
+                no_activation, activations, storage_hooks, *args):
+        """Compute forward pass including boilerplate code.
+
+        This should not be called directly, use the apply method of this class.
+
+        Args:
+            ctx (Context):                  Context object, see PyTorch docs
+            x (Tensor):                     4D input tensor
+            in_channels (int):              Number of channels on input
+            out_channels (int):             Number of channels on output
+            training (bool):                Whethere we are training right now
+            stride (int):                   Stride to use for convolutions
+            no_activation (bool):           Whether to compute an initial
+                                            activation in the residual function
+            activations (List):             Activation stack
+            storage_hooks (List[Function]): Functions to apply to activations
+                                            before storing them
+            *args:                          Should contain all the Parameters
+                                            of the module
+        """
 
         if not no_activation:
             f_params = [Variable(x) for x in args[:8]]
@@ -255,6 +277,7 @@ class RevBlockFunction(Function):
         ctx.stride = stride
         ctx.training = training
         ctx.no_activation = no_activation
+        ctx.storage_hooks = storage_hooks
         ctx.activations = activations
         ctx.in_channels = in_channels
         ctx.out_channels = out_channels
@@ -311,18 +334,19 @@ class RevBlockFunction(Function):
             ctx.activations,
             f_params, ctx.f_buffs,
             g_params, ctx.g_buffs,
-            no_activation=ctx.no_activation
+            no_activation=ctx.no_activation,
+            storage_hooks=ctx.storage_hooks
         )
 
         num_buffs = 2 if ctx.no_activation else 4
 
-        return ((dx, None, None, None, None, None, None) + tuple(dfw) +
+        return ((dx, None, None, None, None, None, None, None) + tuple(dfw) +
                 tuple(dgw) + tuple([None]*num_buffs) + tuple([None]*4))
 
 
 class RevBlock(nn.Module):
     def __init__(self, in_channels, out_channels, activations, stride=1,
-                 no_activation=False):
+                 no_activation=False, storage_hooks=[]):
         super(RevBlock, self).__init__()
 
         self.in_channels = in_channels // 2
@@ -330,6 +354,7 @@ class RevBlock(nn.Module):
         self.stride = stride
         self.no_activation = no_activation
         self.activations = activations
+        self.storage_hooks = storage_hooks
 
         if not no_activation:
             self.register_parameter(
@@ -471,8 +496,9 @@ class RevBlock(nn.Module):
             self.stride,
             self.no_activation,
             self.activations,
+            self.storage_hooks,
             *self._parameters.values(),
-            *self._buffers.values()
+            *self._buffers.values(),
         )
 
 
