@@ -17,9 +17,7 @@ import torchvision.transforms as transforms
 from torch.autograd import Variable
 from torch.optim.lr_scheduler import StepLR
 
-import revnet as models
-import revnet.revnet as revnet
-
+import revnet
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--model", metavar="NAME",
@@ -53,7 +51,7 @@ def main():
 
     args = parser.parse_args()
 
-    model = getattr(models, args.model)()
+    model = getattr(revnet, args.model)()
 
     exp_id = "cifar_{0}_{1:%Y-%m-%d}_{1:%H-%M-%S}".format(model.name,
                                                           datetime.now())
