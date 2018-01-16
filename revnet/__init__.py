@@ -1,5 +1,5 @@
 from .resnet import ResNet
-from .revnet import RevNet, RevBlock, RevBlockFunction
+from .revnet import RevNet, RevBlock, RevBlockFunction, possible_downsample
 
 
 def resnet32():

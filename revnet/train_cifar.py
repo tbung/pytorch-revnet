@@ -157,6 +157,8 @@ def main():
             for i in vaccs:
                 f.write('{}\n'.format(i))
 
+    return model
+
 
 def train(epoch, model, criterion, optimizer, trainloader, clip):
     model.train()
