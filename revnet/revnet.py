@@ -10,7 +10,6 @@ CUDA = torch.cuda.is_available()
 
 
 def possible_downsample(x, in_channels, out_channels, stride=1):
-    out = None
 
     # Downsample image
     if stride > 1:
@@ -19,14 +18,14 @@ def possible_downsample(x, in_channels, out_channels, stride=1):
     # Pad with empty channels
     if in_channels < out_channels:
 
-        if out is None:
-            out = x
+        try: out
+        except: out = x
 
         pad = Variable(torch.zeros(
             out.size(0),
             (out_channels - in_channels) // 2,
             out.size(2), out.size(3)
-        ))
+        ), requires_grad=True)
 
         if CUDA:
             pad = pad.cuda()
@@ -36,8 +35,9 @@ def possible_downsample(x, in_channels, out_channels, stride=1):
 
     # If we did nothing, add zero tensor, so the output of this function
     # depends on the input in the graph
-    if out is None:
-        injection = Variable(torch.zeros_like(x.data))
+    try: out
+    except:
+        injection = Variable(torch.zeros_like(x.data), requires_grad=True)
 
         if CUDA:
             injection.cuda()
@@ -84,43 +84,44 @@ class RevBlockFunction(Function):
 
         x1, x2 = torch.chunk(x, 2, dim=1)
 
-        x1 = Variable(x1, volatile=True).contiguous()
-        x2 = Variable(x2, volatile=True).contiguous()
+        with torch.no_grad():
+            x1 = Variable(x1.contiguous())
+            x2 = Variable(x2.contiguous())
 
-        if CUDA:
-            x1.cuda()
-            x2.cuda()
+            if CUDA:
+                x1.cuda()
+                x2.cuda()
 
-        x1_ = possible_downsample(x1, in_channels, out_channels, stride)
-        x2_ = possible_downsample(x2, in_channels, out_channels, stride)
+            x1_ = possible_downsample(x1, in_channels, out_channels, stride)
+            x2_ = possible_downsample(x2, in_channels, out_channels, stride)
 
-        f_x2 = RevBlockFunction.residual(
-            x2,
-            in_channels,
-            out_channels,
-            f_params,
-            f_buffs, training,
-            stride=stride,
-            no_activation=no_activation
-        )
+            f_x2 = RevBlockFunction.residual(
+                x2,
+                in_channels,
+                out_channels,
+                f_params,
+                f_buffs, training,
+                stride=stride,
+                no_activation=no_activation
+            )
 
-        y1 = f_x2 + x1_
+            y1 = f_x2 + x1_
 
-        g_y1 = RevBlockFunction.residual(
-            y1,
-            out_channels,
-            out_channels,
-            g_params,
-            g_buffs,
-            training
-        )
+            g_y1 = RevBlockFunction.residual(
+                y1,
+                out_channels,
+                out_channels,
+                g_params,
+                g_buffs,
+                training
+            )
 
-        y2 = g_y1 + x2_
+            y2 = g_y1 + x2_
 
-        y = torch.cat([y1, y2], dim=1)
+            y = torch.cat([y1, y2], dim=1)
 
-        del y1, y2
-        del x1, x2
+            del y1, y2
+            del x1, x2
 
         return y
 
@@ -129,31 +130,32 @@ class RevBlockFunction(Function):
                   g_params, g_buffs, training, no_activation):
 
         y1, y2 = torch.chunk(output, 2, dim=1)
-        y1 = Variable(y1, volatile=True).contiguous()
-        y2 = Variable(y2, volatile=True).contiguous()
+        with torch.no_grad():
+            y1 = Variable(y1.contiguous())
+            y2 = Variable(y2.contiguous())
 
-        x2 = y2 - RevBlockFunction.residual(
-            y1,
-            out_channels,
-            out_channels,
-            g_params,
-            g_buffs,
-            training=training
-        )
+            x2 = y2 - RevBlockFunction.residual(
+                y1,
+                out_channels,
+                out_channels,
+                g_params,
+                g_buffs,
+                training=training
+            )
 
-        x1 = y1 - RevBlockFunction.residual(
-            x2,
-            in_channels,
-            out_channels,
-            f_params,
-            f_buffs,
-            training=training
-        )
+            x1 = y1 - RevBlockFunction.residual(
+                x2,
+                in_channels,
+                out_channels,
+                f_params,
+                f_buffs,
+                training=training
+            )
 
-        del y1, y2
-        x1, x2 = x1.data, x2.data
+            del y1, y2
+            x1, x2 = x1.data, x2.data
 
-        x = torch.cat((x1, x2), 1)
+            x = torch.cat((x1, x2), 1)
         return x
 
     @staticmethod
@@ -164,62 +166,65 @@ class RevBlockFunction(Function):
 
         x1, x2 = torch.chunk(x, 2, dim=1)
 
-        x1 = Variable(x1, requires_grad=True).contiguous()
-        x2 = Variable(x2, requires_grad=True).contiguous()
+        with torch.enable_grad():
+            x1 = Variable(x1.contiguous(), requires_grad=True)
+            x2 = Variable(x2.contiguous(), requires_grad=True)
+            x1.retain_grad()
+            x2.retain_grad()
 
-        if CUDA:
-            x1.cuda()
-            x2.cuda()
+            if CUDA:
+                x1.cuda()
+                x2.cuda()
 
-        x1_ = possible_downsample(x1, in_channels, out_channels, stride)
-        x2_ = possible_downsample(x2, in_channels, out_channels, stride)
+            x1_ = possible_downsample(x1, in_channels, out_channels, stride)
+            x2_ = possible_downsample(x2, in_channels, out_channels, stride)
 
-        f_x2 = RevBlockFunction.residual(
-            x2,
-            in_channels,
-            out_channels,
-            f_params,
-            f_buffs,
-            training=training,
-            stride=stride,
-            no_activation=no_activation
-        )
+            f_x2 = RevBlockFunction.residual(
+                x2,
+                in_channels,
+                out_channels,
+                f_params,
+                f_buffs,
+                training=training,
+                stride=stride,
+                no_activation=no_activation
+            )
 
-        y1_ = f_x2 + x1_
+            y1_ = f_x2 + x1_
 
-        g_y1 = RevBlockFunction.residual(
-            y1_,
-            out_channels,
-            out_channels,
-            g_params,
-            g_buffs,
-            training=training
-        )
+            g_y1 = RevBlockFunction.residual(
+                y1_,
+                out_channels,
+                out_channels,
+                g_params,
+                g_buffs,
+                training=training
+            )
 
-        y2_ = g_y1 + x2_
+            y2_ = g_y1 + x2_
 
-        dd1 = torch.autograd.grad(y2_, (y1_,) + tuple(g_params), dy2,
-                                  retain_graph=True)
-        dy2_y1 = dd1[0]
-        dgw = dd1[1:]
-        dy1_plus = dy2_y1 + dy1
-        dd2 = torch.autograd.grad(y1_, (x1, x2) + tuple(f_params), dy1_plus,
-                                  retain_graph=True)
-        dfw = dd2[2:]
+            dd1 = torch.autograd.grad(y2_, (y1_,) + tuple(g_params), dy2,
+                                      retain_graph=True)
+            dy2_y1 = dd1[0]
+            dgw = dd1[1:]
+            dy1_plus = dy2_y1 + dy1
+            dd2 = torch.autograd.grad(y1_, (x1, x2) + tuple(f_params), dy1_plus,
+                                      retain_graph=True)
+            dfw = dd2[2:]
 
-        dx2 = dd2[1]
-        dx2 += torch.autograd.grad(x2_, x2, dy2, retain_graph=True)[0]
-        dx1 = dd2[0]
+            dx2 = dd2[1]
+            dx2 += torch.autograd.grad(x2_, x2, dy2, retain_graph=True)[0]
+            dx1 = dd2[0]
 
-        for hook in storage_hooks:
-            x = hook(x)
+            for hook in storage_hooks:
+                x = hook(x)
 
-        activations.append(x)
+            activations.append(x)
 
-        y1_.detach_()
-        y2_.detach_()
-        del y1_, y2_
-        dx = torch.cat((dx1, dx2), 1)
+            y1_.detach_()
+            y2_.detach_()
+            del y1_, y2_
+            dx = torch.cat((dx1, dx2), 1)
 
         return dx, dfw, dgw
 
