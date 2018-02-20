@@ -8,12 +8,29 @@ from torch.autograd import Function, Variable
 
 CUDA = torch.cuda.is_available()
 
+def size_after_residual(size, out_channels, kernel_size, stride, padding, dilation):
+    """Calculate the size of the output of the residual function
+    """
+    N, C_in, H_in, W_in = size
 
-def possible_downsample(x, in_channels, out_channels, stride=1):
+    H_out = math.floor(
+        (H_in + 2*padding - dilation*(kernel_size - 1) - 1) / stride + 1
+    )
+    W_out = math.floor(
+        (W_in + 2*padding - dilation*(kernel_size - 1) - 1) / stride + 1
+    )
+    return N, out_channels, H_out, W_out
+
+
+def possible_downsample(x, in_channels, out_channels, stride=1, padding=1,
+                        dilation=1):
+    _, _, H_in, W_in = x.size()
+
+    _, _, H_out, W_out = size_after_residual(x.size(), out_channels, 3, stride, padding, dilation)
 
     # Downsample image
-    if stride > 1:
-        out = F.avg_pool2d(x, stride, stride)
+    if H_in > H_out or W_in > W_out:
+        out = F.avg_pool2d(x, 2*dilation+1, stride, padding)
 
     # Pad with empty channels
     if in_channels < out_channels:
@@ -50,7 +67,7 @@ def possible_downsample(x, in_channels, out_channels, stride=1):
 class RevBlockFunction(Function):
     @staticmethod
     def residual(x, in_channels, out_channels, params, buffers, training,
-                 stride=1, no_activation=False):
+                 stride=1, padding=1, dilation=1, no_activation=False):
         """Compute a pre-activation residual function.
 
         Args:
@@ -69,18 +86,21 @@ class RevBlockFunction(Function):
                                params[1], training)
             out = F.relu(out)
 
-        out = F.conv2d(out, params[-6], params[-5], stride, padding=1)
+        out = F.conv2d(out, params[-6], params[-5], stride, padding=padding,
+                       dilation=dilation)
 
         out = F.batch_norm(out, buffers[-2], buffers[-1], params[-4],
                            params[-3], training)
         out = F.relu(out)
-        out = F.conv2d(out, params[-2], params[-1], stride=1, padding=1)
+        out = F.conv2d(out, params[-2], params[-1], stride=1, padding=1,
+                       dilation=1)
 
         return out
 
     @staticmethod
-    def _forward(x, in_channels, out_channels, training, stride,
-                 f_params, f_buffs, g_params, g_buffs, no_activation=False):
+    def _forward(x, in_channels, out_channels, training, stride, padding,
+                 dilation, f_params, f_buffs, g_params, g_buffs,
+                 no_activation=False):
 
         x1, x2 = torch.chunk(x, 2, dim=1)
 
@@ -92,8 +112,10 @@ class RevBlockFunction(Function):
                 x1.cuda()
                 x2.cuda()
 
-            x1_ = possible_downsample(x1, in_channels, out_channels, stride)
-            x2_ = possible_downsample(x2, in_channels, out_channels, stride)
+            x1_ = possible_downsample(x1, in_channels, out_channels, stride,
+                                      padding, dilation)
+            x2_ = possible_downsample(x2, in_channels, out_channels, stride,
+                                      padding, dilation)
 
             f_x2 = RevBlockFunction.residual(
                 x2,
@@ -102,6 +124,8 @@ class RevBlockFunction(Function):
                 f_params,
                 f_buffs, training,
                 stride=stride,
+                padding=padding,
+                dilation=dilation,
                 no_activation=no_activation
             )
 
@@ -127,7 +151,7 @@ class RevBlockFunction(Function):
 
     @staticmethod
     def _backward(output, in_channels, out_channels, f_params, f_buffs,
-                  g_params, g_buffs, training, no_activation):
+                  g_params, g_buffs, training, padding, dilation, no_activation):
 
         y1, y2 = torch.chunk(output, 2, dim=1)
         with torch.no_grad():
@@ -149,7 +173,9 @@ class RevBlockFunction(Function):
                 out_channels,
                 f_params,
                 f_buffs,
-                training=training
+                training=training,
+                padding=padding,
+                dilation=dilation
             )
 
             del y1, y2
@@ -159,8 +185,8 @@ class RevBlockFunction(Function):
         return x
 
     @staticmethod
-    def _grad(x, dy, in_channels, out_channels, training, stride,
-              activations, f_params, f_buffs, g_params, g_buffs,
+    def _grad(x, dy, in_channels, out_channels, training, stride, padding,
+              dilation, activations, f_params, f_buffs, g_params, g_buffs,
               no_activation=False, storage_hooks=[]):
         dy1, dy2 = Variable.chunk(dy, 2, dim=1)
 
@@ -176,8 +202,10 @@ class RevBlockFunction(Function):
                 x1.cuda()
                 x2.cuda()
 
-            x1_ = possible_downsample(x1, in_channels, out_channels, stride)
-            x2_ = possible_downsample(x2, in_channels, out_channels, stride)
+            x1_ = possible_downsample(x1, in_channels, out_channels, stride,
+                                      padding, dilation)
+            x2_ = possible_downsample(x2, in_channels, out_channels, stride,
+                                      padding, dilation)
 
             f_x2 = RevBlockFunction.residual(
                 x2,
@@ -187,6 +215,8 @@ class RevBlockFunction(Function):
                 f_buffs,
                 training=training,
                 stride=stride,
+                padding=padding,
+                dilation=dilation,
                 no_activation=no_activation
             )
 
@@ -229,8 +259,8 @@ class RevBlockFunction(Function):
         return dx, dfw, dgw
 
     @staticmethod
-    def forward(ctx, x, in_channels, out_channels, training, stride,
-                no_activation, activations, storage_hooks, *args):
+    def forward(ctx, x, in_channels, out_channels, training, stride, padding,
+                dilation, no_activation, activations, storage_hooks, *args):
         """Compute forward pass including boilerplate code.
 
         This should not be called directly, use the apply method of this class.
@@ -268,8 +298,10 @@ class RevBlockFunction(Function):
             for var in g_params:
                 var.cuda()
 
-        # if stride > 1 information is lost and we need to save the input
-        if stride > 1 or no_activation:
+        # if the images get smaller information is lost and we need to save the input
+        _, _, H_in, W_in = x.size()
+        _, _, H_out, W_out = size_after_residual(x.size(), out_channels, 3, stride, padding, dilation)
+        if H_in > H_out or W_in > W_out or no_activation:
             activations.append(x)
             ctx.load_input = True
         else:
@@ -280,6 +312,8 @@ class RevBlockFunction(Function):
         ctx.f_buffs = f_buffs
         ctx.g_buffs = g_buffs
         ctx.stride = stride
+        ctx.padding = padding
+        ctx.dilation = dilation
         ctx.training = training
         ctx.no_activation = no_activation
         ctx.storage_hooks = storage_hooks
@@ -293,6 +327,8 @@ class RevBlockFunction(Function):
             out_channels,
             training,
             stride,
+            padding,
+            dilation,
             f_params, f_buffs,
             g_params, g_buffs,
             no_activation=no_activation
@@ -326,6 +362,8 @@ class RevBlockFunction(Function):
                 f_params, ctx.f_buffs,
                 g_params, ctx.g_buffs,
                 ctx.training,
+                ctx.padding,
+                ctx.dilation,
                 ctx.no_activation
             )
 
@@ -336,6 +374,8 @@ class RevBlockFunction(Function):
             out_channels,
             ctx.training,
             ctx.stride,
+            ctx.padding,
+            ctx.dilation,
             ctx.activations,
             f_params, ctx.f_buffs,
             g_params, ctx.g_buffs,
@@ -345,18 +385,20 @@ class RevBlockFunction(Function):
 
         num_buffs = 2 if ctx.no_activation else 4
 
-        return ((dx, None, None, None, None, None, None, None) + tuple(dfw) +
+        return ((dx, None, None, None, None, None, None, None, None, None) + tuple(dfw) +
                 tuple(dgw) + tuple([None]*num_buffs) + tuple([None]*4))
 
 
 class RevBlock(nn.Module):
     def __init__(self, in_channels, out_channels, activations, stride=1,
-                 no_activation=False, storage_hooks=[]):
+                 padding=1, dilation=1, no_activation=False, storage_hooks=[]):
         super(RevBlock, self).__init__()
 
         self.in_channels = in_channels // 2
         self.out_channels = out_channels // 2
         self.stride = stride
+        self.padding = padding
+        self.dilation = dilation
         self.no_activation = no_activation
         self.activations = activations
         self.storage_hooks = storage_hooks
@@ -499,6 +541,8 @@ class RevBlock(nn.Module):
             self.out_channels,
             self.training,
             self.stride,
+            self.padding,
+            self.dilation,
             self.no_activation,
             self.activations,
             self.storage_hooks,
