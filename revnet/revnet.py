@@ -338,13 +338,13 @@ class RevBlockFunction(Function):
 
     @staticmethod
     def backward(ctx, grad_out):
-        saved_variables = list(ctx.saved_variables)
+        saved_tensors = list(ctx.saved_tensors)
         if not ctx.no_activation:
-            f_params = saved_variables[:8]
-            g_params = saved_variables[8:16]
-        else:
-            f_params = saved_variables[:6]
-            g_params = saved_variables[6:14]
+            f_params = [Variable(p, requires_grad=True) for p in saved_tensors[:8]]
+            g_params = [Variable(p, requires_grad=True) for p in saved_tensors[8:16]]
+        else: 
+            f_params = [Variable(p, requires_grad=True) for p in saved_tensors[:6]]
+            g_params = [Variable(p, requires_grad=True) for p in saved_tensors[6:14]]
 
         in_channels = ctx.in_channels
         out_channels = ctx.out_channels
