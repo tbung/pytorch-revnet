@@ -188,7 +188,7 @@ class RevBlockFunction(Function):
     def _grad(x, dy, in_channels, out_channels, training, stride, padding,
               dilation, activations, f_params, f_buffs, g_params, g_buffs,
               no_activation=False, storage_hooks=[]):
-        dy1, dy2 = Variable.chunk(dy, 2, dim=1)
+        dy1, dy2 = torch.chunk(dy, 2, dim=1)
 
         x1, x2 = torch.chunk(x, 2, dim=1)
 
