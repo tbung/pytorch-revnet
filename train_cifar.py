@@ -185,10 +185,10 @@ def train(epoch, model, criterion, optimizer, trainloader, clip):
             model.free()
 
         if clip > 0:
-            torch.nn.utils.clip_grad_norm(model.parameters(), clip)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), clip)
         optimizer.step()
 
-        train_loss += loss.data[0]
+        train_loss += loss.item()
         _, predicted = torch.max(outputs.data, 1)
         total += labels.size(0)
         correct += predicted.eq(labels.data).cpu().sum()
